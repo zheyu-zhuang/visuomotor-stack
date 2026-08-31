@@ -1,0 +1,58 @@
+# Augmentation parameter defaults
+#
+# Recipes select each method with `enabled` or `disabled` under the
+# `input_augmentation` section. To override a default,
+# replace the selector with a mapping:
+#
+# input_augmentation:
+#   voxel_crop: {method: enabled, output: 60}
+#
+# Resolution merges that mapping with this file and rejects unknown fields.
+
+input:
+  # --------------------------------------------------------------------------
+  # Crops
+  # --------------------------------------------------------------------------
+  # RGB keeps a fixed 76 px model input. Disabling the method removes the
+  # random/center crop margin but retains the required resize to 76 px.
+  rgb_crop: {train: random, evaluation: center, resize: 84, output: 76}
+
+  # Voxel crop runs after coupled scene transforms: random during training and
+  # centered during evaluation. Disabling it retains the full voxel grid.
+  voxel_crop: {train: random, evaluation: center, output: 58}
+
+  # --------------------------------------------------------------------------
+  # Image overlays
+  # --------------------------------------------------------------------------
+  # Focus encoders select these per view and regime because each overlay must
+  # stay paired with its corresponding view transform.
+  mask_guided_overlay:
+    probability: 0.5
+    alpha: [0.3, 0.8]
+    mask_noise_std: 0.05
+    warmup_steps: 2500
+  random_background_overlay:
+    probability: 0.5
+    alpha: [0.6, 0.6]
+    warmup_steps: 2500
+
+  # --------------------------------------------------------------------------
+  # Coupled scene transforms
+  # --------------------------------------------------------------------------
+  # Mirror jointly reflects RGB observations, poses, and actions in this frame.
+  mirror:
+    prob: 0.5
+    frame_pose:
+      pos: [-0.1, 0.0, 1.0]
+      rot:
+        - [0.0, 1.0, 0.0]
+        - [1.0, 0.0, 0.0]
+        - [0.0, 0.0, -1.0]
+
+  # Scene yaw jointly rotates the full voxel scene, world-space observations,
+  # actions, and targets. The voxel producer supplies the rotation workspace.
+  scene_yaw:
+    min_deg: -180.0
+    max_deg: 180.0
+    max_attempts: 64
+    identity_probability: 0.015625

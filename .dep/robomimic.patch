@@ -1,0 +1,503 @@
+diff --git a/robomimic/envs/env_robosuite.py b/robomimic/envs/env_robosuite.py
+index 7f983cd..5033abd 100644
+--- a/robomimic/envs/env_robosuite.py
++++ b/robomimic/envs/env_robosuite.py
+@@ -4,7 +4,9 @@ to provide a standardized environment API for training policies and interacting
+ with metadata present in datasets.
+ """
+ import json
++import cv2
+ import numpy as np
++import open3d as o3d
+ from copy import deepcopy
+ 
+ import robosuite
+@@ -26,16 +28,46 @@ except ImportError:
+     MUJOCO_EXCEPTIONS = []
+ 
+ 
++def _accumulate_channels(flat_indices, values, cells):
++    """Sum each colour channel into its voxel cell.
++
++    ``np.bincount`` per channel is several times faster than a single
++    ``np.add.at`` scatter over the same indices, and gives identical sums.
++    """
++    return np.stack(
++        [
++            np.bincount(flat_indices, weights=values[:, channel], minlength=cells)
++            for channel in range(values.shape[1])
++        ],
++        axis=-1,
++    )
++
++
+ class EnvRobosuite(EB.EnvBase):
+     """Wrapper class for robosuite environments (https://github.com/ARISE-Initiative/robosuite)"""
+     def __init__(
+-        self, 
+-        env_name, 
+-        render=False, 
+-        render_offscreen=False, 
+-        use_image_obs=False, 
+-        use_depth_obs=False, 
+-        postprocess_visual_obs=True, 
++        self,
++        env_name,
++        render=False,
++        render_offscreen=False,
++        use_image_obs=False,
++        use_depth_obs=False,
++        postprocess_visual_obs=True,
++        use_voxel_obs=False,
++        voxel_resolution=(64, 64, 64),
++        voxel_bounds_min=None,
++        voxel_bounds_max=None,
++        voxel_ws_size=0.6,
++        voxel_cameras=None,
++        voxel_producers=None,
++        use_point_cloud_obs=False,
++        point_cloud_num_points=1024,
++        point_cloud_bounds_min=None,
++        point_cloud_bounds_max=None,
++        point_cloud_ws_size=0.6,
++        point_cloud_table_margin=0.005,
++        point_cloud_cameras=None,
++        spatial_recon_resolution=84,
+         **kwargs,
+     ):
+         """
+@@ -59,9 +91,47 @@ class EnvRobosuite(EB.EnvBase):
+             postprocess_visual_obs (bool): if True, postprocess image observations
+                 to prepare for learning. This should only be False when extracting observations
+                 for saving to a dataset (to save space on RGB images for example).
++
++            use_voxel_obs (bool): build a fused RGB occupancy voxel grid.
++            use_point_cloud_obs (bool): build a fused fixed-size RGB point cloud.
++            spatial_recon_resolution (int): RGB-D resolution used for 3D reconstruction.
+         """
+         self.postprocess_visual_obs = postprocess_visual_obs
+         self.use_depth_obs = use_depth_obs
++        self.use_voxel_obs = bool(use_voxel_obs)
++        self.voxel_resolution = tuple(int(v) for v in voxel_resolution)
++        self.voxel_bounds_min = (
++            tuple(float(v) for v in voxel_bounds_min) if voxel_bounds_min is not None else None
++        )
++        self.voxel_bounds_max = (
++            tuple(float(v) for v in voxel_bounds_max) if voxel_bounds_max is not None else None
++        )
++        self.voxel_ws_size = float(voxel_ws_size)
++        self.voxel_cameras = tuple(str(v) for v in voxel_cameras) if voxel_cameras is not None else None
++        self.voxel_producers = (
++            None if voxel_producers is None else tuple(deepcopy(voxel_producers))
++        )
++        self.use_point_cloud_obs = bool(use_point_cloud_obs)
++        self.point_cloud_num_points = int(point_cloud_num_points)
++        self.point_cloud_bounds_min = (
++            tuple(float(v) for v in point_cloud_bounds_min) if point_cloud_bounds_min is not None else None
++        )
++        self.point_cloud_bounds_max = (
++            tuple(float(v) for v in point_cloud_bounds_max) if point_cloud_bounds_max is not None else None
++        )
++        self.point_cloud_ws_size = float(point_cloud_ws_size)
++        self.point_cloud_table_margin = float(point_cloud_table_margin)
++        if self.point_cloud_table_margin <= 0:
++            raise ValueError("point_cloud_table_margin must be positive")
++        self.point_cloud_cameras = (
++            tuple(str(v) for v in point_cloud_cameras) if point_cloud_cameras is not None else None
++        )
++        self.spatial_recon_resolution = (
++            None if spatial_recon_resolution is None else int(spatial_recon_resolution)
++        )
++        if self.use_voxel_obs or self.use_point_cloud_obs:
++            use_depth_obs = True
++            self.use_depth_obs = True
+ 
+         # robosuite version check
+         self._is_v1 = (robosuite.__version__.split(".")[0] == "1")
+@@ -105,6 +175,151 @@ class EnvRobosuite(EB.EnvBase):
+                 if ("joint_pos" in ob_name) or ("eef_vel" in ob_name):
+                     self.env.modify_observable(observable_name=ob_name, attribute="active", modifier=True)
+ 
++        table_center = np.array([0.0, 0.0, 0.7])
++        table_height = table_center[2]
++        if hasattr(self.env, "table_offset"):
++            table_offset = np.asarray(self.env.table_offset)
++            table_center[:2] = table_offset[:2]
++            table_height = table_offset[2]
++
++        if self.use_voxel_obs or self.use_point_cloud_obs:
++            if self.point_cloud_cameras is None:
++                self.point_cloud_cameras = tuple(self.env.camera_names)
++
++        if self.use_voxel_obs:
++            if self.voxel_producers is None:
++                if self.voxel_cameras is None:
++                    self.voxel_cameras = tuple(self.env.camera_names)
++                if self.voxel_bounds_min is None or self.voxel_bounds_max is None:
++                    half = self.voxel_ws_size / 2.0
++                    self.voxel_bounds_min = (
++                        table_center[0] - half,
++                        table_center[1] - half,
++                        table_center[2],
++                    )
++                    self.voxel_bounds_max = (
++                        table_center[0] + half,
++                        table_center[1] + half,
++                        table_center[2] + self.voxel_ws_size,
++                    )
++                self.voxel_producers = ({
++                    "output_key": "voxel",
++                    "frame": "world",
++                    "resolution": self.voxel_resolution,
++                    "bounds_min": self.voxel_bounds_min,
++                    "bounds_max": self.voxel_bounds_max,
++                    "ws_size": self.voxel_ws_size,
++                    "cameras": self.voxel_cameras,
++                },)
++            normalized = []
++            for value in self.voxel_producers:
++                producer = dict(value)
++                producer["output_key"] = str(producer.get("output_key", "voxel"))
++                producer["frame"] = str(producer.get("frame", "world"))
++                producer["resolution"] = tuple(int(v) for v in producer["resolution"])
++                producer["ws_size"] = float(producer.get("ws_size", 0.6))
++                producer["cameras"] = tuple(
++                    str(v) for v in producer.get("cameras") or self.env.camera_names
++                )
++                if producer["frame"] == "eef_centered":
++                    half = producer["ws_size"] / 2.0
++                    producer["bounds_min"] = tuple(producer.get("bounds_min") or (-half,) * 3)
++                    producer["bounds_max"] = tuple(producer.get("bounds_max") or (half,) * 3)
++                elif producer["frame"] == "world":
++                    half = producer["ws_size"] / 2.0
++                    producer["bounds_min"] = tuple(producer.get("bounds_min") or (
++                        table_center[0] - half, table_center[1] - half, table_center[2]
++                    ))
++                    producer["bounds_max"] = tuple(producer.get("bounds_max") or (
++                        table_center[0] + half,
++                        table_center[1] + half,
++                        table_center[2] + producer["ws_size"],
++                    ))
++                else:
++                    raise ValueError("voxel producer frame must be 'world' or 'eef_centered'")
++                normalized.append(producer)
++            keys = [producer["output_key"] for producer in normalized]
++            if len(keys) != len(set(keys)):
++                raise ValueError("voxel producer output keys must be unique")
++            self.voxel_producers = tuple(normalized)
++            self.voxel_cameras = tuple(dict.fromkeys(
++                camera for producer in self.voxel_producers for camera in producer["cameras"]
++            ))
++        else:
++            self.voxel_cameras = ()
++
++        self._visual_obs_enabled = True
++        if self.use_voxel_obs or self.use_point_cloud_obs:
++            self._spatial_cameras = tuple(dict.fromkeys(
++                (*self.voxel_cameras, *self.point_cloud_cameras)
++            ))
++            if self.point_cloud_bounds_min is None or self.point_cloud_bounds_max is None:
++                half = self.point_cloud_ws_size / 2.0
++                self.point_cloud_bounds_min = (
++                    table_center[0] - half,
++                    table_center[1] - half,
++                    table_height + self.point_cloud_table_margin,
++                )
++                self.point_cloud_bounds_max = (
++                    table_center[0] + half,
++                    table_center[1] + half,
++                    table_height + self.point_cloud_ws_size,
++                )
++
++        self._init_kwargs.update(
++            use_voxel_obs=self.use_voxel_obs,
++            voxel_resolution=list(self.voxel_resolution),
++            voxel_bounds_min=list(self.voxel_bounds_min) if self.voxel_bounds_min is not None else None,
++            voxel_bounds_max=list(self.voxel_bounds_max) if self.voxel_bounds_max is not None else None,
++            voxel_ws_size=self.voxel_ws_size,
++            voxel_cameras=list(self.voxel_cameras) if self.voxel_cameras is not None else None,
++            voxel_producers=[dict(value) for value in self.voxel_producers] if self.voxel_producers is not None else None,
++            use_point_cloud_obs=self.use_point_cloud_obs,
++            point_cloud_num_points=self.point_cloud_num_points,
++            point_cloud_bounds_min=(
++                list(self.point_cloud_bounds_min) if self.point_cloud_bounds_min is not None else None
++            ),
++            point_cloud_bounds_max=(
++                list(self.point_cloud_bounds_max) if self.point_cloud_bounds_max is not None else None
++            ),
++            point_cloud_ws_size=self.point_cloud_ws_size,
++            point_cloud_table_margin=self.point_cloud_table_margin,
++            point_cloud_cameras=list(self.point_cloud_cameras) if self.point_cloud_cameras is not None else None,
++            spatial_recon_resolution=self.spatial_recon_resolution,
++        )
++
++    def set_visual_obs_enabled(self, enabled, keep_cameras=()):
++        """Enable or disable camera rendering and RGB-D fusion.
++
++        A disabled camera observable never runs its sensor, so robosuite skips
++        the offscreen render entirely. Callers that discard an observation --
++        e.g. the intermediate control steps of an action chunk -- use this to
++        avoid producing it. ``keep_cameras`` stays live regardless, for the
++        video recorder's render camera.
++        """
++        enabled = bool(enabled)
++        keep = set(keep_cameras)
++        observables = getattr(self.env, "_observables", {})
++        for camera in self.env.camera_names:
++            active = enabled or camera in keep
++            for suffix in ("image", "depth"):
++                name = "{}_{}".format(camera, suffix)
++                observable = observables.get(name)
++                if observable is None:
++                    continue
++                # set_enabled() resets the observable, zeroing its cached frame,
++                # so only write on an actual transition.
++                if observable.is_enabled() is active:
++                    continue
++                self.env.modify_observable(name, "enabled", active)
++                if active:
++                    # That reset() leaves _sampled set -- only __init__ clears
++                    # it -- so the next update() would skip this camera's sensor
++                    # for a whole control step and keep serving the zero: one
++                    # black video frame and a partially fused cloud.
++                    observable._sampled = False
++        self._visual_obs_enabled = enabled
++
+     def step(self, action):
+         """
+         Step in the environment with an action.
+@@ -207,10 +422,19 @@ class EnvRobosuite(EB.EnvBase):
+         if di is None:
+             di = self.env._get_observations(force_update=True) if self._is_v1 else self.env._get_observation()
+         ret = {}
++        need_spatial = (
++            self.use_voxel_obs or self.use_point_cloud_obs
++        ) and self._visual_obs_enabled
++        raw_rgb_by_camera = {}
++        raw_depth_by_camera = {}
+         for k in di:
+             if (k in ObsUtils.OBS_KEYS_TO_MODALITIES) and ObsUtils.key_is_obs_modality(key=k, obs_modality="rgb"):
+                 # by default images from mujoco are flipped in height
+                 ret[k] = di[k][::-1]
++                if need_spatial and k.endswith("_image"):
++                    camera = k[: -len("_image")]
++                    if camera in self._spatial_cameras:
++                        raw_rgb_by_camera[camera] = ret[k]
+                 if self.postprocess_visual_obs:
+                     ret[k] = ObsUtils.process_obs(obs=ret[k], obs_key=k)
+             elif (k in ObsUtils.OBS_KEYS_TO_MODALITIES) and ObsUtils.key_is_obs_modality(key=k, obs_modality="depth"):
+@@ -218,9 +442,13 @@ class EnvRobosuite(EB.EnvBase):
+                 ret[k] = di[k][::-1]
+                 if len(ret[k].shape) == 2:
+                     ret[k] = ret[k][..., None] # (H, W, 1)
+-                assert len(ret[k].shape) == 3 
++                assert len(ret[k].shape) == 3
+                 # scale entries in depth map to correspond to real distance.
+                 ret[k] = self.get_real_depth_map(ret[k])
++                if need_spatial and k.endswith("_depth"):
++                    camera = k[: -len("_depth")]
++                    if camera in self._spatial_cameras:
++                        raw_depth_by_camera[camera] = ret[k]
+                 if self.postprocess_visual_obs:
+                     ret[k] = ObsUtils.process_obs(obs=ret[k], obs_key=k)
+ 
+@@ -242,8 +470,159 @@ class EnvRobosuite(EB.EnvBase):
+             ret["eef_pos"] = np.array(di["eef_pos"])
+             ret["eef_quat"] = np.array(di["eef_quat"])
+             ret["gripper_qpos"] = np.array(di["gripper_qpos"])
++
++        if need_spatial:
++            world_points = []
++            world_colors = []
++            for camera in self._spatial_cameras:
++                if camera not in raw_rgb_by_camera or camera not in raw_depth_by_camera:
++                    continue
++                points, colors = self._unproject_camera_points(
++                    camera, raw_rgb_by_camera[camera], raw_depth_by_camera[camera]
++                )
++                if points.shape[0] > 0:
++                    world_points.append(points)
++                    world_colors.append(colors)
++            all_points = np.concatenate(world_points, axis=0) if world_points else np.zeros((0, 3))
++            all_colors = (
++                np.concatenate(world_colors, axis=0) if world_colors else np.zeros((0, 3), dtype=np.uint8)
++            )
++            if self.use_voxel_obs:
++                eef_position = None
++                for key, value in ret.items():
++                    if key.endswith("_eef_pos"):
++                        eef_position = np.asarray(value).reshape(3)
++                for producer in self.voxel_producers:
++                    if producer["frame"] == "world":
++                        grid = self._bin_points_to_voxel_grid(
++                            all_points, all_colors, producer["bounds_min"],
++                            producer["bounds_max"], producer["resolution"]
++                        )
++                    else:
++                        if eef_position is None:
++                            raise KeyError("EEF-centered voxel production requires EEF position")
++                        local_points = all_points - eef_position
++                        grid = self._bin_centered_points_to_voxel_grid(
++                            local_points, all_colors, producer["bounds_min"],
++                            producer["bounds_max"], producer["resolution"]
++                        )
++                    ret[producer["output_key"]] = grid
++            if self.use_point_cloud_obs:
++                all_pcd = o3d.geometry.PointCloud()
++                all_pcd.points = o3d.utility.Vector3dVector(all_points)
++                all_pcd.colors = o3d.utility.Vector3dVector(
++                    all_colors.astype(np.float64) / 255.0
++                )
++                ret["point_cloud"] = self._build_point_cloud_observation(
++                    all_pcd, self.point_cloud_bounds_min, self.point_cloud_bounds_max
++                )
+         return ret
+ 
++    def _unproject_camera_points(self, camera_name, rgb, depth):
++        """Unproject an RGB-D frame into world-frame xyz/RGB points."""
++        depth2d = depth[..., 0]
++        rgb2d = rgb
++        target = self.spatial_recon_resolution
++        if target is not None and target < depth2d.shape[0]:
++            depth2d = cv2.resize(depth2d, (target, target), interpolation=cv2.INTER_AREA)
++            rgb2d = cv2.resize(rgb2d, (target, target), interpolation=cv2.INTER_AREA)
++        mask = depth2d > 0
++        if not np.any(mask):
++            return np.zeros((0, 3)), np.zeros((0, 3), dtype=np.uint8)
++        ys, xs = np.nonzero(mask)
++        z = depth2d[ys, xs].astype(np.float64)
++        height, width = depth2d.shape[:2]
++        K = self.get_camera_intrinsic_matrix(camera_name, height, width)
++        fx, fy, cx, cy = K[0, 0], K[1, 1], K[0, 2], K[1, 2]
++        x_cam = (xs - cx) * z / fx
++        y_cam = (ys - cy) * z / fy
++        cam_pts = np.stack([x_cam, y_cam, z, np.ones_like(z)], axis=-1)
++        camera_to_world = self.get_camera_extrinsic_matrix(camera_name)
++        world_pts = (camera_to_world @ cam_pts.T).T[:, :3]
++        return world_pts, rgb2d[ys, xs]
++
++    def _bin_points_to_voxel_grid(self, points, colors, bounds_min, bounds_max, resolution):
++        """Build a dense [occupancy, RGB] voxel grid.
++
++        This reproduces Open3D's ``CreateFromPointCloudWithinBounds`` indexing
++        (``floor((p - min_bound) / voxel_size)`` with the same inflated
++        ``voxel_size``) and its per-voxel mean colour, in numpy. Open3D returns
++        one Python object per occupied voxel, which dominated the rollout's
++        per-control-step cost.
++        """
++        res = int(resolution[0])
++        out = np.zeros((4, res, res, res), dtype=np.uint8)
++        points = np.asarray(points, dtype=np.float64)
++        if points.shape[0] == 0:
++            return out
++        bmin = np.asarray(bounds_min, dtype=np.float64)
++        bmax = np.asarray(bounds_max, dtype=np.float64)
++        voxel_size = (bmax[0] - bmin[0]) / res + 1e-4
++        indices = np.floor((points - bmin) / voxel_size).astype(np.int64)
++        valid = np.all((indices >= 0) & (indices < res), axis=-1)
++        if not np.any(valid):
++            return out
++        flat = np.ravel_multi_index(indices[valid].T, (res, res, res))
++        cells = res ** 3
++        counts = np.bincount(flat, minlength=cells)
++        # Open3D averages the [0, 1] colours it was handed, so accumulate in the
++        # same units to match its rounding.
++        unit_colors = np.asarray(colors, dtype=np.float64)[valid] / 255.0
++        color_sum = _accumulate_channels(flat, unit_colors, cells)
++        occupied = counts > 0
++        mean_color = color_sum[occupied] / counts[occupied, None]
++        flat_out = out.reshape(4, -1)
++        flat_out[0, occupied] = 1
++        flat_out[1:, occupied] = np.clip(mean_color.T * 255, 0, 255).astype(np.uint8)
++        return out
++
++    def _bin_centered_points_to_voxel_grid(self, points, colors, bounds_min, bounds_max, resolution):
++        """Build an exact-pitch dense world-aligned local [occupancy, RGB] grid."""
++        shape = tuple(int(value) for value in resolution)
++        out = np.zeros((4, *shape), dtype=np.uint8)
++        if points.shape[0] == 0:
++            return out
++        lower = np.asarray(bounds_min, dtype=np.float64)
++        upper = np.asarray(bounds_max, dtype=np.float64)
++        unit = (points - lower) / (upper - lower)
++        valid = np.all((unit >= 0.0) & (unit < 1.0), axis=-1)
++        if not np.any(valid):
++            return out
++        indices = np.floor(unit[valid] * np.asarray(shape)).astype(np.int64)
++        flat = np.ravel_multi_index(indices.T, shape)
++        cells = int(np.prod(shape))
++        counts = np.bincount(flat, minlength=cells)
++        color_sum = _accumulate_channels(
++            flat, np.asarray(colors, dtype=np.float64)[valid], cells
++        )
++        occupied = counts > 0
++        mean_color = color_sum[occupied] / counts[occupied, None]
++        out.reshape(4, -1)[0, occupied] = 1
++        out.reshape(4, -1)[1:, occupied] = np.clip(mean_color.T, 0, 255).astype(np.uint8)
++        return out
++
++    def _build_point_cloud_observation(self, pcd, bounds_min, bounds_max):
++        """Crop and FPS-sample a fixed-size xyz/RGB point cloud."""
++        num_points = int(self.point_cloud_num_points)
++        bounding_box = o3d.geometry.AxisAlignedBoundingBox(
++            np.asarray(bounds_min, dtype=np.float64), np.asarray(bounds_max, dtype=np.float64)
++        )
++        cropped = pcd.crop(bounding_box)
++        if len(cropped.points) == 0:
++            cropped.points = o3d.utility.Vector3dVector(np.zeros((1, 3)))
++            cropped.colors = o3d.utility.Vector3dVector(np.zeros((1, 3)))
++        if len(cropped.points) < num_points:
++            pad = num_points - len(cropped.points)
++            pad_idx = np.arange(pad, dtype=np.int64) % len(cropped.points)
++            xyz = np.concatenate([np.asarray(cropped.points), np.asarray(cropped.points)[pad_idx]], axis=0)
++            rgb = np.concatenate([np.asarray(cropped.colors), np.asarray(cropped.colors)[pad_idx]], axis=0)
++            cropped.points = o3d.utility.Vector3dVector(xyz)
++            cropped.colors = o3d.utility.Vector3dVector(rgb)
++        sampled = cropped.farthest_point_down_sample(num_points)
++        xyz = np.asarray(sampled.points, dtype=np.float32)
++        rgb01 = np.asarray(sampled.colors, dtype=np.float32)
++        return np.concatenate([xyz, rgb01], axis=-1)
++
+     def get_real_depth_map(self, depth_map):
+         """
+         Reproduced from https://github.com/ARISE-Initiative/robosuite/blob/c57e282553a4f42378f2635b9a3cbc4afba270fd/robosuite/utils/camera_utils.py#L106
+@@ -441,6 +820,10 @@ class EnvRobosuite(EB.EnvBase):
+         is_v1 = (robosuite.__version__.split(".")[0] == "1")
+         has_camera = (len(camera_names) > 0)
+ 
++        if kwargs.get("use_voxel_obs") or kwargs.get("use_point_cloud_obs"):
++            # Spatial observations require metric depth.
++            use_depth_obs = True
++
+         new_kwargs = {
+             "reward_shaping": reward_shaping,
+         }
+diff --git a/robomimic/macros.py b/robomimic/macros.py
+index 3b6c050..3e81684 100644
+--- a/robomimic/macros.py
++++ b/robomimic/macros.py
+@@ -18,10 +18,4 @@ WANDB_API_KEY = None
+ try:
+     from robomimic.macros_private import *
+ except ImportError:
+-    from robomimic.utils.log_utils import log_warning
+-    import robomimic
+-    log_warning(
+-        "No private macro file found!"\
+-        "\nIt is recommended to use a private macro file"\
+-        "\nTo setup, run: python {}/scripts/setup_macros.py".format(robomimic.__path__[0])
+-    )
++    pass
+diff --git a/robomimic/utils/env_utils.py b/robomimic/utils/env_utils.py
+index 465b509..bba95ee 100644
+--- a/robomimic/utils/env_utils.py
++++ b/robomimic/utils/env_utils.py
+@@ -180,8 +180,6 @@ def create_env(
+         postprocess_visual_obs=True,
+         **kwargs,
+     )
+-    print("Created environment with name {}".format(env_name))
+-    print("Action size is {}".format(env.action_dimension))
+     return env
+ 
+ 

@@ -1,0 +1,6 @@
+# Kind:    domain_rand
+# Summary: Full domain randomization over 25 rendered backgrounds, plus
+#          table texture shuffling.
+name: domain_rand
+dataset_suffix: "_tex25"
+shuffle_table_texture: true

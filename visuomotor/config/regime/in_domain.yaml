@@ -1,0 +1,6 @@
+# Kind:    in_domain
+# Summary: Baseline regime — fixed table texture, no background augmentation
+#          or domain randomization.
+name: in_domain
+dataset_suffix: ""
+shuffle_table_texture: false

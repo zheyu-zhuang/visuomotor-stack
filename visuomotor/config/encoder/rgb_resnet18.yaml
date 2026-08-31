@@ -1,0 +1,18 @@
+name: rgb_resnet18
+
+compatibility:
+  representation: rgb
+  requires_rgb_views: []
+  accepts_rgb_views: [external, wrist]
+
+feature_encoder:
+  architecture: resnet18
+  feature_dim: 64
+  pretrained_imagenet: true
+  weights_shared_between_views: false
+
+view_strategies: disabled
+
+fusion:
+  architecture: concat
+  include_selected_proprio: true

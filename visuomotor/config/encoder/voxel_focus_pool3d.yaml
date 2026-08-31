@@ -1,0 +1,31 @@
+name: voxel_focus_pool3d
+
+compatibility:
+  representation: voxel
+  requires_rgb_views: []
+  accepts_rgb_views: [external, wrist]
+
+voxel_branch:
+  architecture: voxel_focus_pool3d
+  feature_dim: 256
+  query_field: gripper_qpos
+  heads: 4
+  iterations: 3
+  pool_stage: 3
+  attention_prior:
+    enabled: true
+    weight: 0.01
+    sigma_cells: 1.0
+    bootstrap_steps: 10000
+
+rgb_branch:
+  architecture: resnet18
+  feature_dim: 256
+  pretrained_imagenet: true
+  augmentation: none
+
+view_strategies: disabled
+
+fusion:
+  architecture: concat
+  include_selected_proprio: true

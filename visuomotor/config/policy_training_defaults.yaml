@@ -1,0 +1,162 @@
+# Shared policy-training defaults. Select a descriptive `train_*` primary
+# config rather than running this file directly.
+defaults:
+  - _self_
+  - augmentation@augmentation_defaults: defaults
+  - paths@_global_
+  - input: rgb_external_wrist
+  - encoder: rgb_resnet18
+  - policy: global_diffusion
+  - regime: in_domain
+  - override hydra/job_logging: disabled
+
+name: policy
+_target_: visuomotor.workspace.policy_training.TrainPolicyWorkspace
+
+#==============================================================================
+#                                  Experiment
+#==============================================================================
+task: square_d0
+seed: 0
+n_demo: 100
+action_rep: absolute
+exp_name: ${n_demo}d_${action_rep}_s${seed}
+method_name: ${encoder.name}${input.run_suffix}
+experiment_path: ${policy.wandb_project}/${task}/${method_name}
+
+#==============================================================================
+#                                    Shapes
+#==============================================================================
+# Shared by dataset, policy, and rollout.
+action_dim: 10
+horizon: 16
+n_obs_steps: 2
+n_action_steps: 8
+
+#==============================================================================
+#                                     Data
+#==============================================================================
+val_ratio: 0.02
+cache_dir: null
+env_name: null
+batch_size: 128
+
+# Input augmentation
+input_augmentation:
+  # Crop
+  rgb_crop: disabled
+  voxel_crop: disabled
+
+  # Coupled scene transforms
+  mirror: disabled
+  scene_yaw: disabled
+
+# Image and voxel modalities cross this boundary in their cached uint8 form and
+# are widened on device, so a worker's batch is a quarter of the model input.
+dataloader:
+  batch_size: ${batch_size}
+  num_workers: 8
+  shuffle: true
+  pin_memory: true
+  persistent_workers: true
+  drop_last: true
+
+# Validation runs once every `val_every` epochs; it does not justify holding
+# persistent workers for the rest of the run.
+val_dataloader:
+  batch_size: ${batch_size}
+  num_workers: 4
+  shuffle: true
+  pin_memory: true
+  persistent_workers: false
+
+#==============================================================================
+#                                   Rollout
+#==============================================================================
+rollout:
+  n_test: 50
+  n_test_vis: 3
+  test_start_seed: 100000
+  n_envs: 25
+  fps: 10
+  crf: 28
+
+visualization:
+  enabled: true
+  num_samples: 6
+  augmentation_preview: true
+  save:
+    images: true
+    videos: true
+  upload:
+    images: false
+    videos: false
+
+#==============================================================================
+#                                 Optimization
+#==============================================================================
+optimizer:
+  lr: 1.0e-4
+  betas: [0.95, 0.999]
+  eps: 1.0e-8
+  weight_decay: 1.0e-6
+
+ema:
+  update_after_step: 0
+  inv_gamma: 1.0
+  power: 0.75
+  min_value: 0.0
+  max_value: 0.9999
+
+# Intervals are in optimizer steps; the resolver converts them to epochs.
+training:
+  device: cuda:0
+  debug: false
+  resume: true
+  total_steps: 50000
+  rollout_interval_steps: 1000
+  checkpoint_interval_steps: 1000
+  lr_scheduler: cosine
+  lr_warmup_steps: 500
+  use_ema: true
+  val_every: 10
+  max_train_steps: null
+  max_val_steps: null
+  tqdm_interval_sec: 1.0
+  log_freq: 1000
+
+#==============================================================================
+#                            Logging / Checkpoints
+#==============================================================================
+checkpoint:
+  topk:
+    monitor_key: test_mean_score
+    mode: max
+    k: 0
+    format_str: 'epoch={epoch:04d}-test_mean_score={test_mean_score:.3f}.ckpt'
+  save_last_ckpt: true
+  save_topk_full_ckpt: false
+
+logging:
+  project: ${policy.wandb_project}
+  resume: true
+  id: null
+  name: ${method_name}
+  group: ${task}
+  job_type: train_policy
+  tags:
+    - task=${task}
+    - stage=policy
+    - input=${input.name}
+    - encoder=${encoder.name}
+    - policy=${policy.name}
+    - regime=${regime.name}
+    - action=${action_rep}
+    - demonstrations=${n_demo}
+    - seed=${seed}
+
+hydra:
+  job:
+    override_dirname: ${name}
+  run:
+    dir: experiments/${experiment_path}/${exp_name}

@@ -1,0 +1,19 @@
+defaults:
+  - policy_training_defaults
+  - override input: rgb_external_wrist
+  - override encoder: seeker_resnet18
+  - override policy: global_diffusion
+  - _self_
+
+# Seeker-local image augmentation is selected by `regime` and its encoder
+# view strategies. Coupled mirror augmentation remains disabled.
+input_augmentation:
+  rgb_crop: enabled
+  mirror: disabled
+
+# Match Seeker's downstream focus-policy diffusion head. Seeker pretraining
+# keeps its separate [128, 256, 512] coarse/fine heads.
+policy:
+  observation_feature_dim: 128
+  generator:
+    unet_channels: [512, 1024, 2048]

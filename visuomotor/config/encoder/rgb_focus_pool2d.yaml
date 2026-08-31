@@ -1,0 +1,27 @@
+name: rgb_focus_pool2d
+
+compatibility:
+  representation: rgb
+  requires_rgb_views: []
+  accepts_rgb_views: [external, wrist]
+
+feature_encoder:
+  architecture: focus_pool2d
+  feature_dim: 128
+  pretrained_imagenet: true
+  query_field: gripper_qpos
+  heads: 4
+  iterations: 3
+  pool_stage: 2
+
+view_strategies: disabled
+
+attention_prior:
+  enabled: true
+  weight: 2.0e-4
+  sigma_cells: 1.2
+  bootstrap_steps: 5000
+
+fusion:
+  architecture: concat
+  include_selected_proprio: true

@@ -1,0 +1,9 @@
+name: voxel
+run_suffix: __voxel-only
+rgb_views: []
+proprio: [eef_pos, eef_rot6d, gripper_qpos]
+voxel:
+  key: voxel
+  resolution: [64, 64, 64]
+  channels: [occupancy, R, G, B]
+  ws_size: 0.6

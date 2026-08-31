@@ -1,0 +1,5 @@
+name: rgb_external_wrist
+run_suffix: ""
+rgb_views: [external, wrist]
+proprio: [eef_pos, eef_rot6d, gripper_qpos]
+voxel: null

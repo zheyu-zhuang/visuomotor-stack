@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "visuomotor-stack"
+version = "0.1.0"
+description = "Unified RGB and voxel visuomotor policy stack"
+readme = "README.md"
+requires-python = ">=3.9,<3.10"
+license = {text = "MIT"}
+dependencies = [
+  "diffusers==0.11.*",
+  "dill==0.3.6",
+  "einops==0.4.1",
+  "entmax>=1.3,<2",
+  "flow_matching==1.0.10",
+  "h5py==3.8.*",
+  "hydra-core==1.2.*",
+  "kornia>=0.7,<1",
+  "lmdb>=1.4,<2",
+  "numpy==1.23.3",
+  "open3d",
+  "opencv-python>=4.6,<5",
+  "scipy==1.9.*",
+  "torch==2.1.*",
+  "torchvision==0.16.*",
+  "tqdm==4.64.*",
+  "omegaconf==2.2.*",
+  "pyyaml>=6,<7",
+]
+
+[project.scripts]
+vmstack = "visuomotor.cli:main"
+
+[project.optional-dependencies]
+test = ["pytest>=7,<9"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["visuomotor", "visuomotor.*"]
+exclude = ["tests", "tests.*"]
+
+[tool.setuptools.package-data]
+visuomotor = [
+  "config/*.yaml",
+  "config/input/*.yaml",
+  "config/encoder/*.yaml",
+  "config/policy/*.yaml",
+  "config/regime/*.yaml",
+  "config/augmentation/*.yaml",
+  "config/pretrain/*.yaml",
+  "perception/backbone/dinov3_core/*.md",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff.lint]
+select = ["I", "TID252"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.per-file-ignores]
+# Vendored from Meta's dinov3; keep its own relative-import style so upstream diffs stay clean.
+"visuomotor/perception/backbone/dinov3_core/**" = ["TID252"]

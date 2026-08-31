@@ -1,0 +1,5 @@
+name: rgb_external
+run_suffix: __external-only
+rgb_views: [external]
+proprio: [eef_pos, eef_rot6d, gripper_qpos]
+voxel: null

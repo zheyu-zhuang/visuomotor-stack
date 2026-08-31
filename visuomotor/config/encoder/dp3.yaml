@@ -1,0 +1,20 @@
+name: dp3
+
+compatibility:
+  representation: point_cloud
+  requires_rgb_views: []
+  accepts_rgb_views: []
+
+point_cloud_branch:
+  architecture: pointnet
+  feature_dim: 64
+  use_color: true
+  use_layernorm: true
+  final_norm: layernorm
+
+view_strategies: disabled
+
+fusion:
+  architecture: concat
+  include_selected_proprio: true
+  state_mlp_dims: [64, 64]

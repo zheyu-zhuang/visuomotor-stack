@@ -1,0 +1,6 @@
+# Kind:    image_aug
+# Summary: Background augmentation and table texture shuffling on top of the
+#          in-domain scene, without domain randomization.
+name: image_aug
+dataset_suffix: ""
+shuffle_table_texture: true

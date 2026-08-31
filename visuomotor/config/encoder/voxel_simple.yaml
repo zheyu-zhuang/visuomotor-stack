@@ -1,0 +1,22 @@
+name: voxel_simple
+
+compatibility:
+  representation: voxel
+  requires_rgb_views: []
+  accepts_rgb_views: [external, wrist]
+
+voxel_branch:
+  architecture: voxel_simple
+  feature_dim: 256
+
+rgb_branch:
+  architecture: resnet18
+  feature_dim: 256
+  pretrained_imagenet: true
+  augmentation: none
+
+view_strategies: disabled
+
+fusion:
+  architecture: concat
+  include_selected_proprio: true

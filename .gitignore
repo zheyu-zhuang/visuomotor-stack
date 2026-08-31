@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+
+# Generated outputs
+outputs/
+experiments/
+
+# Local data / model weights
+datasets/
+.weights/
+
+# OS
+.DS_Store
+.vscode/
+
+# Others
+wandb/
+
+# Local research notes
+dev_note.md

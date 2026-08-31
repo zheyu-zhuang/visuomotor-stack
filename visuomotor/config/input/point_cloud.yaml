@@ -1,0 +1,10 @@
+name: point_cloud
+run_suffix: ""
+rgb_views: []
+proprio: [eef_pos, eef_rot6d, gripper_qpos]
+point_cloud:
+  key: point_cloud
+  num_points: 1024
+  channels: [x, y, z, R, G, B]
+  ws_size: 0.6
+  table_margin: 0.005

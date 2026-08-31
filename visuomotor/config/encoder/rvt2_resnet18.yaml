@@ -1,0 +1,33 @@
+name: rvt2_resnet18
+
+compatibility:
+  representation: rgb
+  requires_rgb_views: [external]
+  accepts_rgb_views: [external, wrist]
+
+focus_provider:
+  architecture: rvt2_heatmap
+  checkpoint: ${paths.weights_dir}/rvt2_heatmap.mimicgen.pth
+  query_fields: [eef_pos, eef_rot6d, gripper_qpos]
+
+feature_encoder:
+  architecture: resnet18
+  feature_dim: 64
+  pretrained_imagenet: true
+  weights_shared_between_views: false
+
+view_strategies:
+  external:
+    in_domain: {view_transform: focus_crop, augmentation: none}
+    image_aug: {view_transform: focus_mask_crop, augmentation: mask_guided_overlay}
+    domain_rand: {view_transform: focus_crop, augmentation: none}
+  wrist:
+    in_domain: {view_transform: pass_through, augmentation: none}
+    image_aug: {view_transform: random_overlay, augmentation: random_background_overlay}
+    domain_rand: {view_transform: pass_through, augmentation: none}
+
+focus_input_resolution: 224
+
+fusion:
+  architecture: concat
+  include_selected_proprio: true

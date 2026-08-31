@@ -1,0 +1,18 @@
+# voxel_wrist plus the frame-to-frame proprioceptive change, which gives a
+# policy the recent motion without widening the observation horizon (and so
+# without re-encoding the voxel stream for a second step). See docs/data.md.
+name: voxel_wrist_proprio_delta
+run_suffix: __proprio-delta
+rgb_views: [wrist]
+proprio:
+  - eef_pos
+  - eef_rot6d
+  - gripper_qpos
+  - eef_delta_pos
+  - eef_delta_rotvec
+  - gripper_qpos_delta
+voxel:
+  key: voxel
+  resolution: [64, 64, 64]
+  channels: [occupancy, R, G, B]
+  ws_size: 0.6

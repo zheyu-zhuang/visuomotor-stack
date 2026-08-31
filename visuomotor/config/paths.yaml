@@ -1,0 +1,9 @@
+# Kind:    paths (@package paths, or /paths@_global_)
+# Summary: Centralized path defaults used by Seeker utilities. Each entry is
+#          overridable via its listed environment variable.
+paths:
+  dataset_root: ${oc.env:VISUOMOTOR_DATASET_ROOT,datasets/mimicgen}
+  weights_dir: ${oc.env:VISUOMOTOR_WEIGHTS_DIR,.weights}
+  textures_dir: ${oc.env:VISUOMOTOR_TEXTURES_DIR,datasets/textures}
+  backgrounds_dir: ${oc.env:VISUOMOTOR_BACKGROUNDS_DIR,datasets/backgrounds}
+  task_emb_cache: ${oc.env:VISUOMOTOR_TASK_CACHE_PATH,.weights/task_emb_cache.npz}

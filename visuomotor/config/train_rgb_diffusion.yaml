@@ -1,0 +1,17 @@
+defaults:
+  - policy_training_defaults
+  - override input: rgb_external_wrist
+  - override encoder: rgb_resnet18
+  - override policy: global_diffusion
+  - _self_
+
+input_augmentation:
+  rgb_crop: enabled
+  mirror: disabled
+
+# Match the original image Diffusion Policy training recipe while leaving the
+# shared generator at its smaller factory default.
+policy:
+  observation_feature_dim: 128
+  generator:
+    unet_channels: [512, 1024, 2048]

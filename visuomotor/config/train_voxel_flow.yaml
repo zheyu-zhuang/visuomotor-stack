@@ -1,0 +1,52 @@
+defaults:
+  - policy_training_defaults
+  - override input: voxel_wrist
+  - override encoder: voxel_simple
+  - override policy: global_flow
+  - _self_
+
+input_augmentation:
+  rgb_crop: enabled
+  voxel_crop: enabled
+  scene_yaw: {method: disabled, max_attempts: 1000}
+
+n_obs_steps: 1
+batch_size: 64
+
+dataloader:
+  batch_size: ${batch_size}
+  num_workers: 8
+  shuffle: true
+  pin_memory: true
+  persistent_workers: true
+  drop_last: true
+
+val_dataloader:
+  batch_size: ${batch_size}
+  num_workers: 8
+  shuffle: false
+  pin_memory: true
+  persistent_workers: true
+
+rollout:
+  n_test: 50
+  n_test_vis: 4
+  test_start_seed: 100000
+  n_envs: 25
+  fps: 10
+  crf: 22
+
+training:
+  use_ema: true
+  rollout_interval_steps: 1000
+  checkpoint_interval_steps: 1000
+  val_every: 1
+
+checkpoint:
+  topk:
+    monitor_key: test_mean_score
+    mode: max
+    k: 0
+    format_str: 'epoch={epoch:04d}-test_mean_score={test_mean_score:.3f}.ckpt'
+  save_last_ckpt: true
+  save_topk_full_ckpt: false

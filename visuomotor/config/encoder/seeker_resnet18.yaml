@@ -1,0 +1,35 @@
+name: seeker_resnet18
+
+compatibility:
+  representation: rgb
+  requires_rgb_views: [external]
+  accepts_rgb_views: [external, wrist]
+
+focus_provider:
+  architecture: seeker
+  weights: ${paths.weights_dir}/seeker.mimicgen.pth
+  strict_weights: true
+  checkpoint_views: [external, wrist]
+  query_fields: [eef_pos, eef_rot6d, gripper_qpos]
+
+feature_encoder:
+  architecture: resnet18
+  feature_dim: 64
+  pretrained_imagenet: true
+  weights_shared_between_views: false
+
+view_strategies:
+  external:
+    in_domain: {view_transform: focus_crop, augmentation: none}
+    image_aug: {view_transform: focus_mask_crop, augmentation: mask_guided_overlay}
+    domain_rand: {view_transform: focus_crop, augmentation: none}
+  wrist:
+    in_domain: {view_transform: pass_through, augmentation: none}
+    image_aug: {view_transform: focus_mask, augmentation: mask_guided_overlay}
+    domain_rand: {view_transform: pass_through, augmentation: none}
+
+focus_input_resolution: 224
+
+fusion:
+  architecture: concat
+  include_selected_proprio: true
