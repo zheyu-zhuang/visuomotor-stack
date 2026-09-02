@@ -4,6 +4,52 @@ This document contains operational recipes.
 
 Architecture decisions belong in `docs/architecture.md`.
 
+## Installation and setup
+
+Visuomotor Stack targets Linux with an NVIDIA GPU and CUDA-capable driver. The
+authoritative dependency specification is `conda_environment.yaml`, which pins
+Python 3.9, PyTorch 2.1, and CUDA 11.8.
+
+```bash
+git clone https://github.com/zheyu-zhuang/visuomotor-stack.git
+cd visuomotor-stack
+mamba env create -f conda_environment.yaml
+mamba activate vmstack
+```
+
+MuJoCo and robosuite offscreen rendering require system libraries. Install them
+through the operating system when possible:
+
+```bash
+sudo apt install -y libosmesa6-dev libgl1-mesa-glx libglfw3 patchelf
+```
+
+If `sudo` is unavailable, install the rendering libraries through Conda:
+
+```bash
+mamba install -c conda-forge glew mesalib
+mamba install -c menpo glfw3
+```
+
+From the source checkout, install the suite dependencies and assets:
+
+```bash
+vmstack setup
+```
+
+`vmstack setup` clones, pins, patches, and installs the MimicGen suite
+dependencies recorded in `.dep/mimicgen.lock`. It also downloads and verifies
+the model weights, textures, and backgrounds from the repository's `assets`
+release and builds the task-embedding cache. Dependency checkouts default to
+`../visuomotor-deps/mimic/`.
+
+The command requires the `vmstack` Conda environment. Set
+`VISUOMOTOR_CONDA_ENV` to a different environment name, or clear it to skip the
+check. Use `--assets-only` to skip suite checkouts, `--suite-deps-root <path>`
+to choose their location, `--skip-task-cache` to omit the embedding cache, or
+`--force` to restore locked revisions, reapply patches, and redownload assets.
+Run `vmstack setup --help` for the complete command interface.
+
 ## Typical policy workflow
 
 ```text
@@ -49,7 +95,7 @@ Each recipe below is a complete `input + encoder + policy` selection, run with
 
 Each recipe requires a matching observation cache:
 
-| Recipe family | Required `generate-observations` flags |
+| Recipe family | Required `prepare` flags |
 | --- | --- |
 | `train_rgb_*`, `train_seeker_*` | none beyond the defaults |
 | `train_voxel_*` | `--enable-voxel` |
@@ -102,7 +148,7 @@ vmstack train --config-name=train_rgb_diffusion \
   separately generated cache:
 
 ```bash
-vmstack data generate-observations \
+vmstack data prepare \
   --dataset datasets/mimicgen/${TASK}/${TASK}.hdf5 \
   --n-demo 100 \
   --table-texture-every 25 \
@@ -129,6 +175,17 @@ vmstack train \
   n_demo=100
 ```
 
+Runs are written to:
+
+```text
+experiments/<wandb_project>/<task>/<encoder><input_suffix>/<n_demo>d_<action_rep>_s<seed>/
+```
+
+The latest full training checkpoint is stored at `checkpoints/latest.ckpt`
+inside the run directory. Training and rollout are GPU-oriented; reduce
+`batch_size`, `rollout.n_envs`, and data-loader worker counts on hosts with
+limited resources.
+
 The primary voxel baseline uses DDPM with the source U-Net widths:
 
 ```bash
@@ -147,7 +204,7 @@ Generate the combined spatial cache used by voxel and point-cloud experiments:
 ```bash
 TASK=stack_three_d1
 
-vmstack data generate-observations \
+vmstack data prepare \
   --dataset datasets/mimicgen/${TASK}/${TASK}.hdf5 \
   --n-demo 100 \
   --num-workers 12 \
@@ -200,7 +257,7 @@ task name fails at generation or train time.
 Generate the model-ready observation cache with:
 
 ```bash
-vmstack data generate-observations \
+vmstack data prepare \
   --dataset datasets/mimicgen/${TASK}/${TASK}.hdf5 \
   --n-demo 100 \
   --num-workers 4
@@ -214,7 +271,7 @@ options:
   `regime=domain_rand`.
 - `--overwrite` replaces an existing cache.
 - `--num-workers` sets rerendering parallelism; workers are CPU-bounded.
-- `--enable-voxel`, `--enable-voxel-eef`, `--enable-point-cloud` add the spatial
+- `--enable-voxel` and `--enable-point-cloud` add the spatial
   producers required by the corresponding recipes.
 
 Other dataset operations:

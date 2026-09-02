@@ -196,7 +196,7 @@ def check_cache(cache_dir: str, dataset_path: str) -> None:
             f"  dataset_path: {os.path.abspath(os.path.expanduser(dataset_path))}\n"
             f"  cache_dir   : {cache_dir}\n"
             "\nBuild the cache first, e.g.:\n"
-            "  vmstack data generate-observations --dataset <raw_dataset.hdf5>\n"
+            "  vmstack data prepare --dataset <raw_dataset.hdf5>\n"
         )
 
     missing = [
@@ -214,5 +214,5 @@ def check_cache(cache_dir: str, dataset_path: str) -> None:
         "  missing:\n"
         + "\n".join([f"    - {path}" for path in missing])
         + "\n\nBuild the cache first, e.g.:\n"
-        "  vmstack data generate-observations --dataset <raw_dataset.hdf5>\n"
+        "  vmstack data prepare --dataset <raw_dataset.hdf5>\n"
     )

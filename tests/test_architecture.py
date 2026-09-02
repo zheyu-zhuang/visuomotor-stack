@@ -145,11 +145,12 @@ def test_cli_is_grouped(capsys):
 
     assert cli.main(["data", "--help"]) == 0
     output = capsys.readouterr().out
-    assert "generate-observations" in output
+    assert "prepare" in output
     assert "convert-actions" in output
     assert "playback" in output
     assert "merge" in output
     assert cli.main(["rerender-dataset"]) == 2
+    assert cli.main(["data", "generate-observations"]) == 2
 
 
 def test_package_initializers_are_empty():

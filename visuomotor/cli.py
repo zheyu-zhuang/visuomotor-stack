@@ -155,7 +155,7 @@ def _run_data(args) -> int:
             max_frames=args.max_frames,
             start_from=args.start_from,
         )
-    elif args.data_command == "generate-observations":
+    elif args.data_command == "prepare":
         from visuomotor.config import tasks as ConfigTasks
         from visuomotor.data.core import spatial as Spatial
         from visuomotor.environment.dataset_rendering import render_datasets
@@ -286,22 +286,22 @@ def _build_parser() -> argparse.ArgumentParser:
     playback.add_argument("--max-frames", type=int)
     playback.add_argument("--start-from", type=int, default=0)
 
-    render = operations.add_parser("generate-observations")
-    render.add_argument("--dataset")
-    render.add_argument("--datasets-root")
-    render.add_argument("--tasks", nargs="+")
-    render.add_argument("--n-demo", type=int)
-    render.add_argument("--output-dir")
-    render.add_argument("--output-suffix", default="")
-    render.add_argument("--table-texture-every", type=int)
-    render.add_argument("--oracle-camera", default="agentview")
-    render.add_argument("--oracle-patch-size", type=int, default=16)
-    render.add_argument("--oracle-min-patch-area-fraction", type=float, default=0.05)
-    render.add_argument("--oracle-min-mask-pixels", type=int, default=16)
-    render.add_argument("--num-workers", type=int, default=4)
-    render.add_argument("--enable-voxel", action="store_true")
-    render.add_argument("--enable-point-cloud", action="store_true")
-    render.add_argument("--overwrite", action="store_true")
+    prepare = operations.add_parser("prepare")
+    prepare.add_argument("--dataset")
+    prepare.add_argument("--datasets-root")
+    prepare.add_argument("--tasks", nargs="+")
+    prepare.add_argument("--n-demo", type=int)
+    prepare.add_argument("--output-dir")
+    prepare.add_argument("--output-suffix", default="")
+    prepare.add_argument("--table-texture-every", type=int)
+    prepare.add_argument("--oracle-camera", default="agentview")
+    prepare.add_argument("--oracle-patch-size", type=int, default=16)
+    prepare.add_argument("--oracle-min-patch-area-fraction", type=float, default=0.05)
+    prepare.add_argument("--oracle-min-mask-pixels", type=int, default=16)
+    prepare.add_argument("--num-workers", type=int, default=4)
+    prepare.add_argument("--enable-voxel", action="store_true")
+    prepare.add_argument("--enable-point-cloud", action="store_true")
+    prepare.add_argument("--overwrite", action="store_true")
     return parser
 
 

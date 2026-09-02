@@ -22,6 +22,14 @@ No active implementation task.
   separate. Perception follows `backbone -> focus -> encoder`, with
   `EncoderOutput` as the policy-facing boundary.
 
+### Public CLI
+
+- Observation-cache creation is exposed as `vmstack data prepare`. The former
+  `generate-observations` subcommand is retired without a compatibility alias;
+  its arguments and cache-generation behavior are unchanged.
+- CLI help, cache recovery guidance, RVT-2 guidance, and operational
+  documentation use the new command name.
+
 ### Public policy surface
 
 - Public and private development now use separate repositories. The public
@@ -53,3 +61,7 @@ No active implementation task.
 - Sanitized public release: 380 tests passed and 1 CUDA-only test skipped with
   `NUMBA_DISABLE_JIT=1`; 152 focused tests passed. Ruff, compileall,
   `git diff --check`, and private-surface searches passed.
+- Data preparation CLI rename: `conda run -n vmstack pytest -q
+  tests/test_architecture.py` passed 15 tests; the focused CLI and dataset
+  boundary command passed 16 tests. Direct parser smoke checks, retired-name
+  searches, and `git diff --check` passed.

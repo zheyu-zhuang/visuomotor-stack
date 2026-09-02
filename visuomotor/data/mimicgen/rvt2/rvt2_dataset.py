@@ -177,7 +177,7 @@ def build_rvt2_heatmap_patch_records(
     if dataset.oracle_info is None:
         raise ValueError(
             "Cache is missing oracle info. Rerender the cache with the current "
-            "`vmstack data generate-observations` so camera matrices are exported."
+            "`vmstack data prepare` so camera matrices are exported."
         )
     camera_key = f"camera_matrix_{camera}"
     if camera_key not in dataset.oracle_info:
