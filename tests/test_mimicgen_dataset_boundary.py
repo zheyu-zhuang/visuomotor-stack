@@ -113,6 +113,45 @@ def test_observation_adapter_emits_canonical_physical_observations():
     np.testing.assert_allclose(canonical["eef_rot6d"], expected_rot6d)
 
 
+def test_observation_adapter_pickles_without_voxel_cache_contents(tmp_path):
+    """Spawned dataloader workers must re-map the voxel cache, not copy it."""
+    import pickle
+
+    from visuomotor.data.mimicgen import cache as MimicgenCache
+
+    index_name, colour_name, offsets_name = SparseVoxels.array_names("voxel")
+    arrays = {
+        index_name: np.arange(4 * 2**18, dtype=np.int32),
+        colour_name: np.ones((4 * 2**18, 3), dtype=np.uint8),
+        offsets_name: np.array([0, 2**18, 2**20], dtype=np.int64),
+    }
+    for name, array in arrays.items():
+        path = MimicgenCache._unpacked_array_path(tmp_path, MimicgenCache.archive_key(name))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        np.save(path, array)
+    MimicgenCache.archive_path(tmp_path).touch()
+    (MimicgenCache.unpacked_arrays_dir(tmp_path) / MimicgenCache.ARRAYS_UNPACK_DONE_NAME).touch()
+
+    adapter = _adapter(voxel_keys=("voxel",))
+    adapter.cache_dir = str(tmp_path)
+    adapter._lmdb_env = adapter._lmdb_txn = None
+    adapter.voxel_offsets_by_key = {}
+    adapter.voxel_index_by_key = {}
+    adapter.voxel_colour_by_key = {}
+    adapter.voxel_offsets = adapter.voxel_index = adapter.voxel_colour = None
+    adapter._map_voxel_arrays()
+    assert isinstance(adapter.voxel_index, np.memmap)
+
+    payload = pickle.dumps(adapter)
+    assert len(payload) < 2**16 < arrays[index_name].nbytes
+
+    restored = pickle.loads(payload)
+    assert isinstance(restored.voxel_index, np.memmap)
+    assert restored.voxel_index_by_key["voxel"] is restored.voxel_index
+    for name, attr in ((index_name, "voxel_index"), (colour_name, "voxel_colour"), (offsets_name, "voxel_offsets")):
+        np.testing.assert_array_equal(np.asarray(getattr(restored, attr)), arrays[name])
+
+
 def test_sparse_voxel_storage_rejects_a_grid_it_could_not_represent():
     """Reject dense grids that cannot round-trip through sparse storage."""
     grid = np.zeros((4, 2, 2, 2), dtype=np.uint8)

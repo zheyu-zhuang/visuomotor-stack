@@ -316,29 +316,17 @@ class MimicGenObservationAdapter:
                     raise KeyError(
                         f"voxel key {key!r} does not use sparse occupied-cell storage"
                     )
-                index_name, colour_name, offsets_name = SparseVoxels.array_names(key)
                 self.voxel_resolutions[key] = tuple(
                     int(value) for value in voxel_metadata["resolution"]
                 )
                 self.voxel_channels_by_key[key] = len(voxel_metadata["channels"])
-                self.voxel_offsets_by_key[key] = MimicgenCache.load_numpy_array(
-                    self.cache_dir, offsets_name
-                )
-                self.voxel_index_by_key[key] = MimicgenCache.load_numpy_array(
-                    self.cache_dir, index_name
-                )
-                self.voxel_colour_by_key[key] = MimicgenCache.load_numpy_array(
-                    self.cache_dir, colour_name
-                )
                 self.voxel_max_points_by_key[key] = max_points
             if len(self.voxel_keys) == 1:
                 key = self.voxel_keys[0]
                 self.voxel_resolution = self.voxel_resolutions[key]
                 self.voxel_channels = self.voxel_channels_by_key[key]
-                self.voxel_offsets = self.voxel_offsets_by_key[key]
-                self.voxel_index = self.voxel_index_by_key[key]
-                self.voxel_colour = self.voxel_colour_by_key[key]
                 self.voxel_max_points = self.voxel_max_points_by_key[key]
+            self._map_voxel_arrays()
 
         self.point_cloud_shape = None
         if self.point_cloud_keys:
@@ -365,11 +353,40 @@ class MimicGenObservationAdapter:
                 len(point_cloud_metadata["channels"]),
             )
 
+    def _map_voxel_arrays(self) -> None:
+        """Memory-map the sparse voxel arrays so processes share their file pages."""
+        for key in self.voxel_keys:
+            index_name, colour_name, offsets_name = SparseVoxels.array_names(key)
+            self.voxel_offsets_by_key[key] = MimicgenCache.load_numpy_array(
+                self.cache_dir, offsets_name
+            )
+            self.voxel_index_by_key[key] = MimicgenCache.load_numpy_array(
+                self.cache_dir, index_name
+            )
+            self.voxel_colour_by_key[key] = MimicgenCache.load_numpy_array(
+                self.cache_dir, colour_name
+            )
+        if len(self.voxel_keys) == 1:
+            key = self.voxel_keys[0]
+            self.voxel_offsets = self.voxel_offsets_by_key[key]
+            self.voxel_index = self.voxel_index_by_key[key]
+            self.voxel_colour = self.voxel_colour_by_key[key]
+
     def __getstate__(self):
         state = self.__dict__.copy()
         state["_lmdb_env"] = None
         state["_lmdb_txn"] = None
+        # A pickled memmap carries its whole contents, so every spawned dataloader
+        # worker would hold a private copy of the voxel cache; workers re-map instead.
+        for name in ("voxel_offsets_by_key", "voxel_index_by_key", "voxel_colour_by_key"):
+            state[name] = {}
+        for name in ("voxel_offsets", "voxel_index", "voxel_colour"):
+            state[name] = None
         return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._map_voxel_arrays()
 
     def read(self, global_indices) -> dict[str, np.ndarray]:
         """Read one temporal window and convert it to canonical observations.
