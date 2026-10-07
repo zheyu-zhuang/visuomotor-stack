@@ -232,10 +232,7 @@ class RobomimicImageWrapper(gym.Env):
     def set_observation_needed(self, needed: bool, render_frame: bool = False):
         """Declare whether the next control step's observation will be read.
 
-        ``MultiStepWrapper`` discards every observation but the last
-        ``n_obs_steps`` of an action chunk, so on the others the cameras never
-        need to render and the RGB-D fusion never needs to run. The render
-        camera is kept alive separately for the lanes recording video.
+        Rollouts keep this enabled to preserve camera sampling times.
         """
         needed = bool(needed)
         render_frame = bool(render_frame)

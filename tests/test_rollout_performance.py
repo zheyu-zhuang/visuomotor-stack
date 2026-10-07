@@ -146,8 +146,7 @@ class _ObservationGateEnv(gym.Env):
         return np.zeros((4, 4, 3), dtype=np.uint8)
 
 
-def test_only_the_read_tail_of_an_action_chunk_needs_its_observation():
-    # _get_obs only reads the last n_obs_steps of the chunk.
+def test_cameras_stay_enabled_throughout_an_action_chunk():
     for n_obs_steps in (1, 3):
         base = _ObservationGateEnv()
         env = MultiStepWrapper(
@@ -157,7 +156,7 @@ def test_only_the_read_tail_of_an_action_chunk_needs_its_observation():
 
         env.step(np.zeros((8, 1), dtype=np.float32))
 
-        assert base.declared == [False] * (8 - n_obs_steps) + [True] * n_obs_steps
+        assert base.declared == [True] * 8
 
 
 def test_only_recording_lanes_keep_the_render_camera_on_frame_due_steps():

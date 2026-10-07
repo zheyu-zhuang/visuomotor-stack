@@ -1,15 +1,12 @@
-"""Control steps whose observation the caller discards must not render.
+"""Camera gate behavior and rollout sampling-time parity."""
 
-``MultiStepWrapper`` reads only the last ``n_obs_steps`` observations of an
-action chunk. On the rest, camera rendering and RGB-D fusion are skipped in the
-worker, and the wrapper hands back the last produced visual arrays.
-"""
-
+import gym
 import numpy as np
 import pytest
 from gym import spaces
 
 from visuomotor.data.core import images as CoreImages
+from visuomotor.environment.gym_wrappers import multistep_wrapper as MultiStep
 from visuomotor.environment.robomimic.robomimic_image_wrapper import (
     RobomimicImageWrapper,
 )
@@ -273,3 +270,58 @@ def test_a_render_camera_held_alive_is_never_disabled_and_so_never_resets():
     # Untouched, so its value never went through reset()'s zeroing.
     assert float(np.asarray(agentview._current_observed_value).mean()) == 1.0
     assert env._observables["birdview_image"].is_enabled() is False
+
+
+class _CameraClockEnv(gym.Env):
+    def __init__(self):
+        self.action_space = spaces.Box(-1, 1, shape=(1,), dtype=np.float32)
+        self.observation_space = spaces.Dict({
+            key: spaces.Box(0, np.inf, shape=(2, 2, 3), dtype=np.float64)
+            for key in ("agentview_image", "agentview_depth", "proprio")
+        })
+
+    def reset(self):
+        self.sim = _RealObservableEnv()
+        for observable in self.sim._observables.values():
+            observable.update(self.sim.SUBSTEP, {}, force=True)
+        return self._observation()
+
+    def set_observation_needed(self, needed):
+        _gate(self.sim, needed)
+
+    def step(self, action):
+        for _ in range(25):
+            self.sim.sample_once()
+        return self._observation(), 0.0, False, {}
+
+    def _observation(self):
+        return {
+            "agentview_image": self.sim._observables["agentview_image"].obs.copy(),
+            "agentview_depth": self.sim._observables["agentview_depth"].obs.copy(),
+            "proprio": np.full((2, 2, 3), float(self.sim.tick)),
+        }
+
+
+@pytest.mark.parametrize("n_obs_steps", [1, 2])
+@pytest.mark.parametrize("n_action_steps", [1, 8])
+def test_rollout_camera_timestamps_match_continuous_sampling(n_obs_steps, n_action_steps):
+    reference = _CameraClockEnv()
+    rollout = MultiStep.MultiStepWrapper(
+        _CameraClockEnv(),
+        n_obs_steps=n_obs_steps,
+        n_action_steps=n_action_steps,
+        max_episode_steps=19,
+    )
+    history = [reference.reset()] * n_obs_steps
+    rollout.reset()
+    action = np.zeros((n_action_steps, 1), dtype=np.float32)
+    done = False
+    steps = 0
+    while not done:
+        observed, _, done, _ = rollout.step(action)
+        for _ in range(min(n_action_steps, 19 - steps)):
+            history.append(reference.step(action[0])[0])
+            steps += 1
+        for key in observed:
+            expected = np.stack([obs[key] for obs in history[-n_obs_steps:]])
+            np.testing.assert_array_equal(observed[key], expected, err_msg=key)
