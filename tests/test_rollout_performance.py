@@ -146,7 +146,7 @@ class _ObservationGateEnv(gym.Env):
         return np.zeros((4, 4, 3), dtype=np.uint8)
 
 
-def test_cameras_stay_enabled_throughout_an_action_chunk():
+def test_only_retained_observations_need_visual_processing():
     for n_obs_steps in (1, 3):
         base = _ObservationGateEnv()
         env = MultiStepWrapper(
@@ -156,7 +156,21 @@ def test_cameras_stay_enabled_throughout_an_action_chunk():
 
         env.step(np.zeros((8, 1), dtype=np.float32))
 
-        assert base.declared == [True] * 8
+        assert base.declared == [False] * (8 - n_obs_steps) + [True] * n_obs_steps
+
+
+def test_truncated_chunk_processes_its_actual_observation_tail():
+    base = _ObservationGateEnv()
+    env = MultiStepWrapper(
+        base, n_obs_steps=2, n_action_steps=8, max_episode_steps=11
+    )
+    env.reset()
+    action = np.zeros((8, 1), dtype=np.float32)
+    env.step(action)
+    _, _, done, _ = env.step(action)
+
+    assert bool(done)
+    assert base.declared == [False] * 6 + [True] * 2 + [False, True, True]
 
 
 def test_only_recording_lanes_keep_the_render_camera_on_frame_due_steps():

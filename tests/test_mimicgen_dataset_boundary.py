@@ -191,18 +191,13 @@ def test_sparse_voxel_decode_rejects_a_frame_wider_than_the_recorded_maximum():
 
 def test_observation_adapter_decodes_each_rgb_view_at_its_load_resolution(monkeypatch):
     adapter = _adapter(rgb_keys=("agentview_image", "robot0_eye_in_hand_image"))
+    adapter.rgb_codec = CoreImages.RGBCodec()
+    adapter.meta = {"image_size": 256}
     adapter.image_size = None
     adapter.rgb_load_resolutions = {"rgb_external": 224, "rgb_wrist": 84}
-    monkeypatch.setattr(adapter, "_read_value", lambda *_: b"jpeg")
-    calls = []
-
-    def decode(_value, *, image_size, to_float, fmt):
-        calls.append((image_size, to_float, fmt))
-        return np.zeros((3, image_size, image_size), dtype=np.uint8)
-
-    monkeypatch.setattr(
-        "visuomotor.data.mimicgen.observations.CoreImages.decode_jpg_bytes", decode
-    )
+    source = np.full((256, 256, 3), [240, 120, 20], dtype=np.uint8)
+    encoded = adapter.rgb_codec.encode(source)
+    monkeypatch.setattr(adapter, "_read_value", lambda *_: encoded)
 
     external = adapter._decode_image(None, "agentview_image", 0)
     wrist = adapter._decode_image(None, "robot0_eye_in_hand_image", 0)
@@ -210,37 +205,18 @@ def test_observation_adapter_decodes_each_rgb_view_at_its_load_resolution(monkey
     assert external.shape == (3, 224, 224)
     assert wrist.shape == (3, 84, 84)
     assert external.dtype == wrist.dtype == np.uint8
-    assert calls == [(224, False, "CHW"), (84, False, "CHW")]
+    for image in (external, wrist):
+        np.testing.assert_array_equal(image[:, 0, 0], [240, 120, 20])
 
 
-def test_resized_jpeg_decode_preserves_cached_rgb_channel_convention():
-    source = np.zeros((24, 24, 3), dtype=np.uint8)
-    source[..., 0] = 240
-    source[..., 1] = 120
-    source[..., 2] = 20
-    encoded = CoreImages.encode_rgb_to_jpg_bytes(source, quality=100)
-
-    decoded = CoreImages.decode_jpg_bytes(
-        encoded, image_size=8, to_float=False, fmt="HWC"
-    )
-
-    assert decoded.shape == (8, 8, 3)
-    assert decoded.dtype == np.uint8
-    assert decoded[..., 0].mean() > decoded[..., 1].mean() > decoded[..., 2].mean()
-
-
-def test_native_resolution_jpeg_decode_preserves_native_decoder_path():
+def test_native_resolution_decode_preserves_pixels_with_or_without_load_size():
     source = np.arange(24 * 24 * 3, dtype=np.uint8).reshape(24, 24, 3)
-    encoded = CoreImages.encode_rgb_to_jpg_bytes(source, quality=90)
-
-    native = CoreImages.decode_jpg_bytes(
-        encoded, image_size=None, to_float=False, fmt="HWC"
-    )
-    requested_native = CoreImages.decode_jpg_bytes(
-        encoded, image_size=24, to_float=False, fmt="HWC"
-    )
-
+    codec = CoreImages.RGBCodec()
+    encoded = codec.encode(source)
+    native = codec.decode(encoded, render_resolution=24)
+    requested_native = codec.decode(encoded, render_resolution=24, load_resolution=24)
     np.testing.assert_array_equal(requested_native, native)
+    np.testing.assert_array_equal(native, np.moveaxis(source, -1, 0))
 
 
 def test_observation_adapter_matches_rollout_canonicalization():

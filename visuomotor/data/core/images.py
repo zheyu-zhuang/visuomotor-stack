@@ -1,98 +1,83 @@
 """Image tensor conversion, byte codecs, normalization, and resizing."""
 
-import io
-from typing import Literal, Optional
+from dataclasses import dataclass
+from typing import Literal, Mapping, Optional
 
 import cv2
+import imagecodecs
 import numpy as np
 import torch
 import torch.nn.functional as F
-from PIL import Image
 
 from visuomotor.data.core import normalization as CoreNormalization
 
 IMAGE_SOURCE_MODES = {"raw", "uint8", "float01", "imagenet"}
-ImageFormat = Literal["HWC", "CHW"]
-
-# The cache's RGB codec setting. Rollout replays it inline, so it is the one
-# place either path can change it from.
-JPEG_QUALITY_DEFAULT = 90
 
 
-def decode_jpg_bytes(
-    buf: bytes,
-    image_size: Optional[int] = None,
-    *,
-    bgr_to_rgb: bool = False,
-    to_float: bool = True,
-    fmt: ImageFormat = "CHW",
-) -> np.ndarray:
-    """Decode JPEG bytes, optionally resize, recolor, and change layout."""
-    native_decode = image_size is None
-    if image_size is not None:
-        try:
-            with Image.open(io.BytesIO(buf)) as decoded:
-                native_decode = decoded.size == (image_size, image_size)
-                if not native_decode:
-                    decoded.draft("RGB", (image_size, image_size))
-                    if decoded.size != (image_size, image_size):
-                        decoded = decoded.resize(
-                            (image_size, image_size), resample=Image.Resampling.BOX
-                        )
-                    image = np.asarray(decoded)
-        except (OSError, ValueError) as error:
-            raise ValueError("PIL JPEG decode failed (buffer may be corrupted)") from error
+@dataclass(frozen=True)
+class RGBCodec:
+    """Lossless Blosc Zstd encoding for LMDB RGB frames."""
 
-    if native_decode:
-        image = cv2.imdecode(np.frombuffer(buf, dtype=np.uint8), cv2.IMREAD_COLOR)
-        if image is None:
-            raise ValueError("cv2.imdecode failed (buffer may be corrupted)")
-        if bgr_to_rgb:
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    else:
-        if not bgr_to_rgb:
-            image = image[..., ::-1].copy()
-    if to_float:
-        image = image.astype(np.float32) / 255.0
-    if fmt == "CHW":
-        image = np.moveaxis(image, -1, 0)
-    elif fmt != "HWC":
-        raise ValueError(f"unsupported image format: {fmt}")
-    return image
+    name: Literal["blosc_zstd"] = "blosc_zstd"
+
+    def __post_init__(self):
+        if self.name != "blosc_zstd":
+            raise ValueError(
+                "RGB caches must declare rgb_codec='blosc_zstd'; "
+                "re-render JPEG or unversioned caches from simulator states"
+            )
+
+    @classmethod
+    def from_metadata(cls, metadata: Mapping) -> "RGBCodec":
+        return cls(name=metadata.get("rgb_codec"))
+
+    def metadata(self) -> dict:
+        return {"rgb_codec": self.name}
+
+    def encode(self, image: np.ndarray) -> bytes:
+        """Encode one HWC RGB uint8 frame for LMDB."""
+        _validate_rgb_pixels(image)
+        return imagecodecs.blosc_encode(
+            np.ascontiguousarray(image), level=3, compressor="zstd",
+            typesize=1, shuffle=False, numthreads=1,
+        )
+
+    def decode(
+        self, buf: bytes, *, render_resolution: int,
+        load_resolution: Optional[int] = None,
+    ) -> np.ndarray:
+        """Decode a cache frame to canonical CHW RGB uint8."""
+        pixels = imagecodecs.blosc_decode(buf, numthreads=1)
+        resolution = int(render_resolution)
+        if resolution < 1 or len(pixels) != resolution * resolution * 3:
+            raise ValueError("RGB frame byte count does not match cache image_size")
+        image = np.frombuffer(pixels, dtype=np.uint8).reshape(resolution, resolution, 3)
+        return _prepare_lossless_rgb(image, load_resolution)
 
 
-def encode_rgb_to_jpg_bytes(
-    image: np.ndarray, quality: int = JPEG_QUALITY_DEFAULT
-) -> bytes:
-    """Encode an HWC uint8 RGB image as JPEG bytes."""
-    image = image.astype(np.uint8, copy=False)
-    ok, buffer = cv2.imencode(
-        ".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), int(quality)]
-    )
-    if not ok:
-        raise RuntimeError("cv2.imencode(.jpg) failed")
-    return buffer.tobytes()
+def _validate_rgb_pixels(image: np.ndarray) -> None:
+    if image.dtype != np.uint8 or image.ndim != 3 or image.shape[-1] != 3:
+        raise ValueError("RGB pixels must be HWC uint8 with three channels")
+
+
+def _prepare_lossless_rgb(image: np.ndarray, load_resolution: Optional[int]) -> np.ndarray:
+    _validate_rgb_pixels(image)
+    if load_resolution is not None:
+        resolution = int(load_resolution)
+        if resolution < 1 or resolution > min(image.shape[:2]):
+            raise ValueError("RGB load resolution must be positive and cannot upsample")
+        if image.shape[:2] != (resolution, resolution):
+            image = cv2.resize(image, (resolution, resolution), interpolation=cv2.INTER_AREA)
+    return np.ascontiguousarray(np.moveaxis(image, -1, 0))
 
 
 def canonical_rgb_from_source(
     image: np.ndarray,
     *,
     load_resolution: Optional[int],
-    quality: int = JPEG_QUALITY_DEFAULT,
 ) -> np.ndarray:
-    """Run an HWC uint8 source frame through the cache codec to canonical CHW uint8.
-
-    Dataset loading splits these two halves across the cache write and the
-    cache read; a rollout has no cache in between and runs both here. Sharing
-    the call is what makes a rendered frame reach the policy through the same
-    JPEG quantization and the same decode-time resampling either way.
-    """
-    return decode_jpg_bytes(
-        encode_rgb_to_jpg_bytes(image, quality=quality),
-        image_size=load_resolution,
-        to_float=False,
-        fmt="CHW",
-    )
+    """Prepare direct RGB pixels identically to a decoded lossless cache frame."""
+    return _prepare_lossless_rgb(image, load_resolution)
 
 
 def _range(x: torch.Tensor) -> tuple[float, float]:

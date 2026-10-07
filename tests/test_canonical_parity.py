@@ -28,9 +28,12 @@ from visuomotor.environment.runner import SeekerRobomimicImageRunner
 from visuomotor.geometry import representation as Representation
 
 
-def _rollout_get_observation(shape_meta_obs, raw_obs, rgb_load_resolutions=None):
+def _rollout_get_observation(
+    shape_meta_obs, raw_obs, rgb_load_resolutions=None,
+):
     """Call the real RobomimicImageWrapper.get_observation() without a live env."""
     wrapper = object.__new__(RobomimicImageWrapper)
+    wrapper.wrist_projection = None
     wrapper.shape_meta = {"obs": shape_meta_obs}
     wrapper.observation_space = dict.fromkeys(shape_meta_obs)
     wrapper.render_obs_key = next(iter(shape_meta_obs))
@@ -41,16 +44,18 @@ def _rollout_get_observation(shape_meta_obs, raw_obs, rgb_load_resolutions=None)
     wrapper.skipped_observations = 0
     wrapper.produced_observations = 0
     wrapper.rgb_load_resolutions = dict(rgb_load_resolutions or {})
-    wrapper.rgb_jpeg_quality = CoreImages.JPEG_QUALITY_DEFAULT
     return RobomimicImageWrapper.get_observation(wrapper, raw_obs=raw_obs)
 
 
-def _dataset_decode_cached_rgb(source_hwc, *, canonical_key, load_resolution):
+def _dataset_decode_cached_rgb(
+    source_hwc, *, canonical_key, load_resolution,
+):
     """Read one frame back through the real dataset cache write/read pair."""
-    cached_bytes = CoreImages.encode_rgb_to_jpg_bytes(
-        source_hwc, quality=CoreImages.JPEG_QUALITY_DEFAULT
-    )
+    codec = CoreImages.RGBCodec()
+    cached_bytes = codec.encode(source_hwc)
     adapter = object.__new__(MimicgenObservations.MimicGenObservationAdapter)
+    adapter.rgb_codec = codec
+    adapter.meta = {"image_size": source_hwc.shape[0]}
     adapter.image_size = None
     adapter.rgb_load_resolutions = {canonical_key: int(load_resolution)}
     adapter._read_value = lambda transaction, key, index: cached_bytes
@@ -62,7 +67,7 @@ def _dataset_decode_cached_rgb(source_hwc, *, canonical_key, load_resolution):
 
 
 def _rendered_frame(resolution: int) -> np.ndarray:
-    """A deterministic HWC uint8 frame with edges JPEG and resampling both bite on."""
+    """A deterministic HWC uint8 frame with sharp edges for resampling."""
     rng = np.random.default_rng(0)
     grid = np.arange(resolution, dtype=np.float32)
     ramp = np.stack(
@@ -143,7 +148,7 @@ def test_rollout_rgb_is_byte_identical_to_the_cached_training_encoding(load_reso
         rgb_load_resolutions={"agentview_image": load_resolution},
     )["agentview_image"]
     dataset = _dataset_decode_cached_rgb(
-        source_hwc, canonical_key="rgb_external", load_resolution=load_resolution
+        source_hwc, canonical_key="rgb_external", load_resolution=load_resolution,
     )
 
     assert rollout.dtype == np.uint8 == dataset.dtype
@@ -159,28 +164,10 @@ def test_rollout_rgb_without_a_load_resolution_keeps_the_render_resolution():
     assert obs["agentview_image"].shape == (3, 64, 64)
     np.testing.assert_array_equal(
         obs["agentview_image"],
-        CoreImages.canonical_rgb_from_source(source_hwc, load_resolution=None),
+        CoreImages.canonical_rgb_from_source(
+            source_hwc, load_resolution=None
+        ),
     )
-
-
-def test_uncompressed_rollout_rgb_would_not_match_the_cached_encoding():
-    """The parity above is earned by the shared codec, not by the frame being easy."""
-    load_resolution = 84
-    source_hwc = _rendered_frame(256)
-    dataset = _dataset_decode_cached_rgb(
-        source_hwc, canonical_key="rgb_external", load_resolution=load_resolution
-    )
-    naive = (
-        torch.nn.functional.interpolate(
-            torch.from_numpy(np.moveaxis(source_hwc, -1, 0)).float()[None],
-            size=(load_resolution, load_resolution),
-            mode="area",
-        )[0]
-        .round()
-        .to(torch.uint8)
-        .numpy()
-    )
-    assert not np.array_equal(naive, dataset)
 
 
 # --------------------------------------------------------------- B. RGB post-normalization

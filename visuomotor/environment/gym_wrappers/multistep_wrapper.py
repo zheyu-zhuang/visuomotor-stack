@@ -131,13 +131,16 @@ class MultiStepWrapper(gym.Wrapper):
         """
         actions: (n_action_steps,) + action_shape
         """
-        for act in action:
+        chunk_steps = len(action)
+        if self.max_episode_steps is not None:
+            chunk_steps = min(chunk_steps, self.max_episode_steps - len(self.reward))
+        first_observed = chunk_steps - self.n_obs_steps - bool(self.history_keys)
+        for index, act in enumerate(action):
             if len(self.done) > 0 and self.done[-1]:
                 # termination
                 break
-            # Toggling cameras resets their sampling clocks and delays images
-            # relative to proprioception, even on the retained steps.
-            self.set_observation_needed(True)
+            # Skip processing discarded visuals while cameras keep sampling.
+            self.set_observation_needed(index >= first_observed)
             observation, reward, done, info = super().step(act)
 
             self.obs.append(observation)

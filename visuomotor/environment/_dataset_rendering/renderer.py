@@ -15,9 +15,9 @@ import numpy as np
 import robomimic.utils.env_utils as EnvUtils
 import robomimic.utils.file_utils as FileUtils
 
+from visuomotor.data.core import images as CoreImages
 from visuomotor.data.core import sparse_voxels as SparseVoxels
 from visuomotor.data.core import spatial as Spatial
-from visuomotor.data.core.images import encode_rgb_to_jpg_bytes
 from visuomotor.data.mimicgen import action as MgAction
 from visuomotor.data.mimicgen.oracle import oracle_affordance as OracleAffordance
 from visuomotor.data.mimicgen.oracle import oracle_cache as OracleCache
@@ -84,13 +84,12 @@ class DatasetRenderer:
         voxel_spec: Optional[Spatial.VoxelProducerSpec] = None,
         voxel_specs: Optional[Dict[str, Spatial.VoxelProducerSpec]] = None,
         point_cloud_spec: Optional[Spatial.PointCloudProducerSpec] = None,
-        jpeg_quality: int = RenderingCommon.JPEG_QUALITY_DEFAULT,
         overwrite: bool = False,
     ):
         self.input_path = str(Path(dataset_path).expanduser().resolve())
         self.out_dir = str(Path(out_cache_dir).expanduser().resolve())
         self.res = int(camera_resolution)
-        self.jpeg_quality = int(jpeg_quality)
+        self.rgb_codec = CoreImages.RGBCodec()
         self.oracle_camera = None if oracle_camera is None else str(oracle_camera)
         self.oracle_patch_size = int(oracle_patch_size)
         self.oracle_min_patch_area_fraction = float(oracle_min_patch_area_fraction)
@@ -259,12 +258,9 @@ class DatasetRenderer:
         h5_file: h5py.File,
         ep: str,
         texture_demo_rank: Optional[int] = None,
-        jpeg_quality: Optional[int] = None,
     ) -> RenderingCommon.RenderedEpisode:
         """Rerender one episode into bounded compressed and sparse buffers."""
         is_robosuite_env = EnvUtils.is_robosuite_env(self.env_meta)
-        if jpeg_quality is None:
-            jpeg_quality = self.jpeg_quality
 
         ep_grp = h5_file[f"data/{ep}"]
         states = ep_grp["states"][()]
@@ -321,7 +317,7 @@ class DatasetRenderer:
             )
 
         lowdim_frames: Dict[str, List[np.ndarray]] = defaultdict(list)
-        rgb_jpeg = {key: [] for key in self.rgb_keys}
+        rgb_frames = {key: [] for key in self.rgb_keys}
         voxel_frames = {key: [] for key in self.voxel_specs}
         point_cloud_frames = []
         success = False
@@ -359,9 +355,7 @@ class DatasetRenderer:
                         (self.res, self.res),
                         interpolation=cv2.INTER_AREA,
                     )
-                rgb_jpeg[camera_key].append(
-                    encode_rgb_to_jpg_bytes(image, quality=jpeg_quality)
-                )
+                rgb_frames[camera_key].append(self.rgb_codec.encode(image))
 
             for key in self.voxel_specs:
                 try:
@@ -400,7 +394,7 @@ class DatasetRenderer:
         return RenderingCommon.RenderedEpisode(
             absolute_action=absolute_action,
             lowdim=lowdim,
-            rgb_jpeg=rgb_jpeg,
+            rgb_frames=rgb_frames,
             voxel_frames=voxel_frames,
             point_cloud_frames=point_cloud_frames,
             oracle=oracle_info,

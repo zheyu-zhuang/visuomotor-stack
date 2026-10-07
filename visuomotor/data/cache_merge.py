@@ -164,6 +164,11 @@ def merge_caches(
             metas.append(json.load(f))
 
     ref = metas[0]
+    rgb_codec = CoreImages.RGBCodec.from_metadata(ref)
+    for meta in metas[1:]:
+        CoreImages.RGBCodec.from_metadata(meta)
+    if any(int(meta["image_size"]) != int(ref["image_size"]) for meta in metas):
+        raise ValueError("All input caches must use the same RGB image_size")
     rgb_keys = [str(key) for key in ref["rgb_keys"]]
     oracle_keys = [str(key) for key in ref.get("oracle_keys", [])]
     voxel_keys = [str(key) for key in ref.get("voxel_keys", [])]
@@ -507,9 +512,7 @@ def merge_caches(
         "n_demo": len(episode_lengths),
         "n_samples": int(sum(episode_lengths)),
         "image_size": int(ref["image_size"]),
-        "jpeg_quality": int(
-            ref.get("jpeg_quality", CoreImages.JPEG_QUALITY_DEFAULT)
-        ),
+        **rgb_codec.metadata(),
         "oracle_keys": oracle_keys,
         "source_demo_indices": list(
             map(int, np.concatenate(source_demo_indices, axis=0))

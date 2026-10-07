@@ -265,6 +265,17 @@ class MimicGenObservationAdapter:
         self._lmdb_txn = None
 
         self.meta, self.episode_lengths = MimicgenCache.load_metadata(self.cache_dir)
+        self.rgb_codec = CoreImages.RGBCodec.from_metadata(self.meta)
+        # Loading above the render resolution would silently upsample.
+        requested = list(self.rgb_load_resolutions.values())
+        if self.image_size is not None:
+            requested.append(int(self.image_size))
+        if requested and max(requested) > int(self.meta["image_size"]):
+            raise ValueError(
+                f"RGB loads at {max(requested)} px but the cache renders at "
+                f"{self.meta['image_size']} px; use the 256 px cache "
+                '(dataset_render_suffix: "")'
+            )
         self.lowdim = MimicgenCache.load_lowdim(self.cache_dir, self.lowdim_keys)
         self.derived_lowdim = self._build_derived_lowdim()
         expected_voxel_specs = dict(voxel_specs or {})
@@ -543,8 +554,9 @@ class MimicGenObservationAdapter:
         image_size = self.rgb_load_resolutions.get(
             canonical_camera_key(key), self.image_size
         )
-        return CoreImages.decode_jpg_bytes(
-            value, image_size=image_size, to_float=False, fmt="CHW"
+        return self.rgb_codec.decode(
+            value, render_resolution=int(self.meta["image_size"]),
+            load_resolution=image_size,
         )
 
     def _decode_voxel(self, transaction, key: str, index: int):

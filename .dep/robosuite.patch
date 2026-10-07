@@ -66,3 +66,58 @@ diff --git a/robosuite/wrappers/__init__.py b/robosuite/wrappers/__init__.py
 +#     from robosuite.wrappers.gym_wrapper import GymWrapper
 +# except:
 +#     print("Warning: make sure gym is installed if you want to use the GymWrapper.")
+diff --git a/robosuite/environments/robot_env.py b/robosuite/environments/robot_env.py
+--- a/robosuite/environments/robot_env.py
++++ b/robosuite/environments/robot_env.py
+@@ -165,6 +165,7 @@
+
+         # Observations -- Ground truth = object_obs, Image data = camera_obs
+         self.use_camera_obs = use_camera_obs
++        self._camera_render_enabled = True
+
+         # Camera / Rendering Settings
+         self.has_offscreen_renderer = has_offscreen_renderer
+@@ -366,6 +367,10 @@
+
+         return observables
+
++    def set_camera_render_enabled(self, enabled):
++        """Skip RGB-D rendering without changing observable sampling clocks."""
++        self._camera_render_enabled = bool(enabled)
++
+     def _create_camera_sensors(self, cam_name, cam_w, cam_h, cam_d, cam_segs, modality="image"):
+         """
+         Helper function to create sensors for a given camera. This is abstracted in a separate function call so that we
+@@ -399,8 +404,16 @@
+         depth_sensor_name = f"{cam_name}_depth"
+         segmentation_sensor_name = f"{cam_name}_segmentation"
+
++        cached_rgb = None
++        cached_depth = None
++
+         @sensor(modality=modality)
+         def camera_rgb(obs_cache):
++            nonlocal cached_rgb, cached_depth
++            if not self._camera_render_enabled and cached_rgb is not None:
++                if cam_d:
++                    obs_cache[depth_sensor_name] = cached_depth
++                return cached_rgb
+             img = self.sim.render(
+                 camera_name=cam_name,
+                 width=cam_w,
+@@ -409,10 +422,12 @@
+             )
+             if cam_d:
+                 rgb, depth = img
+-                obs_cache[depth_sensor_name] = np.expand_dims(depth[::convention], axis=-1)
+-                return rgb[::convention]
++                cached_depth = np.expand_dims(depth[::convention], axis=-1)
++                obs_cache[depth_sensor_name] = cached_depth
++                cached_rgb = rgb[::convention]
+             else:
+-                return img[::convention]
++                cached_rgb = img[::convention]
++            return cached_rgb
+
+         sensors.append(camera_rgb)
+         names.append(rgb_sensor_name)

@@ -42,7 +42,7 @@ def _selected_demos(h5_file, demo_indices, start_index):
 
 def _validate_rendered_buffers(rendered, *, length, voxel_keys, point_cloud):
     frame_lengths = {
-        **{f"rgb:{key}": len(frames) for key, frames in rendered.rgb_jpeg.items()},
+        **{f"rgb:{key}": len(frames) for key, frames in rendered.rgb_frames.items()},
         **{
             f"voxel:{key}": len(rendered.voxel_frames[key])
             for key in voxel_keys
@@ -163,7 +163,7 @@ def _cache_metadata(
         "n_demo": int(len(episode_lengths)),
         "n_samples": int(sum(episode_lengths)),
         "image_size": int(renderer.res),
-        "jpeg_quality": int(renderer.jpeg_quality),
+        **renderer.rgb_codec.metadata(),
         "robot_names": robot_names,
         "source_demo_indices": list(map(int, source_demo_indices)),
         "delta_action_horizons": sorted({int(value) for value in delta_horizons}),
@@ -211,7 +211,6 @@ class DatasetRerenderToCache(DatasetRenderer.DatasetRenderer):
         self,
         n_demo: Optional[int],
         start_index: int,
-        jpeg_quality: int,
         lmdb_map_size_gb: int,
         commit_every: int,
         delta_horizons: List[int],
@@ -311,7 +310,6 @@ class DatasetRerenderToCache(DatasetRenderer.DatasetRenderer):
                     h5_file,
                     ep,
                     texture_demo_rank=texture_demo_rank,
-                    jpeg_quality=jpeg_quality,
                 )
                 if not rendered.success:
                     if pbar is not None:
@@ -356,7 +354,7 @@ class DatasetRerenderToCache(DatasetRenderer.DatasetRenderer):
                 for t in range(T):
                     for camera_key in self.rgb_keys:
                         key = f"{camera_key}/{global_step:08d}".encode("ascii")
-                        txn.put(key, rendered.rgb_jpeg[camera_key][t])
+                        txn.put(key, rendered.rgb_frames[camera_key][t])
                         put_count += 1
 
                         if put_count % int(commit_every) == 0:

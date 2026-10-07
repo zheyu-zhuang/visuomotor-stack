@@ -71,8 +71,7 @@ def _validate_spatial_observation(
             )
 
 
-# Observation kinds produced by camera rendering and 3D fusion, i.e. the ones
-# that can be skipped on control steps whose observation the caller discards.
+# Visual processing can be skipped for discarded steps while cameras sample.
 _VISUAL_OBS_TYPES = frozenset({"rgb", "voxel", "point_cloud"})
 
 
@@ -99,7 +98,6 @@ class RobomimicImageWrapper(gym.Env):
         enable_oracle_video_overlay: bool = False,
         oracle_overlay_zoom: float = 4.0,
         rgb_load_resolutions=None,
-        rgb_jpeg_quality: int = CoreImages.JPEG_QUALITY_DEFAULT,
     ):
 
         self.env = env
@@ -126,7 +124,6 @@ class RobomimicImageWrapper(gym.Env):
             str(key): int(value)
             for key, value in dict(rgb_load_resolutions or {}).items()
         }
-        self.rgb_jpeg_quality = int(rgb_jpeg_quality)
         self.enable_oracle_subtask_info = bool(enable_oracle_subtask_info)
         self.oracle_projection_camera = oracle_projection_camera
         self.oracle_projection_height = oracle_projection_height
@@ -232,12 +229,16 @@ class RobomimicImageWrapper(gym.Env):
     def set_observation_needed(self, needed: bool, render_frame: bool = False):
         """Declare whether the next control step's observation will be read.
 
-        Rollouts keep this enabled to preserve camera sampling times.
+        Observable clocks keep advancing on discarded steps while RGB-D
+        rendering and visual preprocessing are skipped. Video-due steps render
+        a fresh camera frame for the recording cache.
         """
         needed = bool(needed)
         render_frame = bool(render_frame)
-        keep = () if needed else ((self.render_camera,) if render_frame else ())
-        self.env.set_visual_obs_enabled(needed, keep_cameras=keep)
+        self.env.env.set_camera_render_enabled(needed or render_frame)
+        self.env.set_visual_obs_enabled(
+            needed, keep_cameras=self.env.env.camera_names
+        )
         self._observation_needed = needed
         self._render_frame_needed = render_frame
 
@@ -252,9 +253,7 @@ class RobomimicImageWrapper(gym.Env):
         for key in self.observation_space.keys():
             field = self.shape_meta["obs"][key]
             obs_type = field.get("type")
-            if obs_type in _VISUAL_OBS_TYPES and key not in raw_obs:
-                # Rendering was skipped for this control step; the caller
-                # discards the result, so reuse the last produced value.
+            if obs_type in _VISUAL_OBS_TYPES and not self._observation_needed:
                 obs[key] = self._last_visual_obs[key]
                 continue
             value = raw_obs[key]
@@ -291,20 +290,13 @@ class RobomimicImageWrapper(gym.Env):
         return obs
 
     def _canonical_rgb(self, key: str, value: np.ndarray) -> np.ndarray:
-        """Compact one rendered frame exactly as the dataset cache stores it.
-
-        Training never sees a rendered frame directly: it sees one that was
-        JPEG-encoded into the cache and decoded back out at the encoder's load
-        resolution. Replaying both halves here is what keeps a rollout
-        observation bit-identical to the trained-on encoding of the same frame.
-        """
+        """Match the cache's RGB preprocessing at the encoder's load resolution."""
         source = np.ascontiguousarray(
             np.moveaxis(np.rint(value * 255.0).astype(np.uint8), -3, -1)
         )
         return CoreImages.canonical_rgb_from_source(
             source,
             load_resolution=self.rgb_load_resolutions.get(key),
-            quality=self.rgb_jpeg_quality,
         )
 
     def seed(self, seed=None):

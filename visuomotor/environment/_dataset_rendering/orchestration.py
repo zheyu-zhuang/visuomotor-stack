@@ -107,7 +107,6 @@ def _rerender_worker(
             builder.render_to_cache(
                 n_demo=None,
                 start_index=0,
-                jpeg_quality=RenderingCommon.JPEG_QUALITY_DEFAULT,
                 lmdb_map_size_gb=RenderingCommon.LMDB_MAP_SIZE_GB_DEFAULT,
                 commit_every=RenderingCommon.COMMIT_EVERY_DEFAULT,
                 delta_horizons=[],
@@ -382,7 +381,6 @@ def _run_single_rerender(
         builder.render_to_cache(
             n_demo=n_demo,
             start_index=start_index,
-            jpeg_quality=RenderingCommon.JPEG_QUALITY_DEFAULT,
             lmdb_map_size_gb=RenderingCommon.LMDB_MAP_SIZE_GB_DEFAULT,
             commit_every=RenderingCommon.COMMIT_EVERY_DEFAULT,
             delta_horizons=delta_horizons,

@@ -10,6 +10,12 @@ No active implementation task.
 
 ## Completed Summary
 
+### Lossless RGB cache encoding and rollout render skipping
+
+- New LMDB RGB caches declare `rgb_codec: blosc_zstd` and store each HWC uint8 frame losslessly with Blosc Zstd level 3, typesize 1, no shuffle, and one codec thread. `imagecodecs==2022.9.26` is a runtime dependency. Generation, merge, dataset reads, playback, and rollout setup enforce the declaration; existing JPEG caches require re-rendering. Merge also requires equal RGB sizes.
+- Rollout consumes direct RGB through the same resize and CHW conversion as cache reads. The Robosuite patch caches each camera's RGB-D pair while skipped control steps keep observable sampling clocks advancing. The wrapper renders fresh RGB on video-due steps and skips discarded visual processing. The multistep wrapper renders the retained observation window, including extra history and truncated chunks. The installed Robosuite dependency must carry the patch.
+- Verification: `OMP_NUM_THREADS=2 NUMBA_CACHE_DIR=/tmp/vmstack-numba-cache /home/zheyu/Anaconda/envs/vmstack/bin/python -m pytest -q tests/test_rgb_cache_codec.py tests/test_canonical_parity.py tests/test_mimicgen_dataset_boundary.py tests/test_rollout_observation_gating.py tests/test_rollout_performance.py tests/test_robomimic_setup.py tests/test_dataset_rendering.py` passed 84 with one CUDA skip; `OMP_NUM_THREADS=2 NUMBA_CACHE_DIR=/tmp/vmstack-numba-cache /home/zheyu/Anaconda/envs/vmstack/bin/python -m pytest -q tests/test_architecture.py` passed 15. Scoped `ruff check`, `git diff --check`, and `git -C /home/zheyu/Codebase/visuomotor-deps/mimic/robosuite apply --reverse --check /tmp/vmstack-port/.dep/robosuite.patch` passed.
+
 ### Architecture and boundaries
 
 - Existing top-level package domains remain stable and are enforced by

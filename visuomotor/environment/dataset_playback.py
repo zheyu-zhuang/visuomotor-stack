@@ -5,6 +5,9 @@ from __future__ import annotations
 import pathlib
 from typing import List, Optional, Sequence
 
+import numpy as np
+
+from visuomotor.data.core import images as CoreImages
 from visuomotor.data.mimicgen import cache as MimicgenCache
 
 
@@ -164,6 +167,7 @@ class DatasetPlayback:
         self.dataset_path = pathlib.Path(dataset_path).expanduser().resolve()
         self.cache_dir = MimicgenCache.resolve_cache_dir(dataset_path, cache_dir)
         self.meta, _ = MimicgenCache.load_metadata(str(self.cache_dir))
+        self.rgb_codec = CoreImages.RGBCodec.from_metadata(self.meta)
         self.episode_lengths = list(map(int, self.meta["episode_lengths"]))
         self.cum_lengths = _cum_lengths(self.episode_lengths)
         self.use_obs = bool(use_obs)
@@ -294,15 +298,14 @@ class DatasetPlayback:
 
     def _decode_cached_frame(self, txn, rgb_key: str, global_idx: int) -> np.ndarray:
         """Decode one cached frame as OpenCV BGR uint8 image."""
-        from visuomotor.data.core.images import decode_jpg_bytes
-
         key = f"{rgb_key}/{int(global_idx):08d}".encode("ascii")
         buf = txn.get(key)
         if buf is None:
             raise KeyError(f"Missing LMDB key: {key!r}")
         # The cache decode path returns RGB tensors for training by default.
         # Convert to BGR here because OpenCV display/write expects BGR.
-        return decode_jpg_bytes(buf, bgr_to_rgb=True, to_float=False, fmt="HWC")
+        image = self.rgb_codec.decode(buf, render_resolution=int(self.meta["image_size"]))
+        return np.ascontiguousarray(np.moveaxis(image, 0, -1)[..., ::-1])
 
     def _show_frame(self, image: np.ndarray, ep_idx: int, local_idx: int) -> bool:
         """Show and optionally save a composed playback frame."""

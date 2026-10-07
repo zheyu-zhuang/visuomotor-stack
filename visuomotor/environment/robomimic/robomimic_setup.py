@@ -210,7 +210,6 @@ def _wrap_robomimic_env(
     enable_oracle_video_overlay: bool = False,
     oracle_overlay_zoom: float = 4.0,
     rgb_load_resolutions=None,
-    rgb_jpeg_quality: int = CoreImages.JPEG_QUALITY_DEFAULT,
 ):
     return MultiStepWrapper(
         VideoWrapper.VideoRecordingWrapper(
@@ -235,7 +234,6 @@ def _wrap_robomimic_env(
                 enable_oracle_video_overlay=enable_oracle_video_overlay,
                 oracle_overlay_zoom=oracle_overlay_zoom,
                 rgb_load_resolutions=rgb_load_resolutions,
-                rgb_jpeg_quality=rgb_jpeg_quality,
             ),
             video_recoder=VideoWrapper.VideoRecorder.create_h264(
                 fps=fps,
@@ -282,7 +280,6 @@ def _build_vector_env(
     enable_oracle_video_overlay: bool,
     oracle_overlay_zoom: float,
     rgb_load_resolutions,
-    rgb_jpeg_quality: int,
 ):
     assigned = (
         assign_textures(str(TEXTURES_DIR), eval_split=True, n_envs=n_envs, seed=0)
@@ -327,7 +324,6 @@ def _build_vector_env(
                 enable_oracle_video_overlay=enable_oracle_video_overlay,
                 oracle_overlay_zoom=oracle_overlay_zoom,
                 rgb_load_resolutions=rgb_load_resolutions,
-                rgb_jpeg_quality=rgb_jpeg_quality,
             )
 
         return env_fn
@@ -355,7 +351,6 @@ def _build_vector_env(
             enable_oracle_subtask_info=False,
             enable_oracle_focus_info=False,
             rgb_load_resolutions=rgb_load_resolutions,
-            rgb_jpeg_quality=rgb_jpeg_quality,
         )
 
     env_fns = [make_env_fn(i) for i in range(n_envs)]
@@ -406,15 +401,10 @@ def _build_rollout_init_specs(
     return env_seeds, env_prefixes, env_init_fn_dills, env_video_enabled
 
 
-def _load_cache_rgb_codec(
+def _load_cache_rgb_resolution(
     *, dataset_path: str, cache_dir: Optional[str]
-) -> tuple[int, int]:
-    """The cache's camera render resolution and JPEG quality.
-
-    Rollout renders at the resolution the cache was built from and replays its
-    codec, so an observation the policy sees in evaluation went through the
-    same reconstruction and the same compression it did in training.
-    """
+) -> int:
+    """Require a lossless RGB cache and load its render resolution."""
     cache_path = resolve_cache_dir(dataset_path, cache_dir)
     meta, _ = load_metadata(str(cache_path))
     try:
@@ -424,8 +414,8 @@ def _load_cache_rgb_codec(
             "rollout cache is missing 'image_size'; rebuild it so rollout can "
             "render at the resolution the dataset was rendered at"
         ) from error
-    quality = int(meta.get("jpeg_quality", CoreImages.JPEG_QUALITY_DEFAULT))
-    return render_resolution, quality
+    CoreImages.RGBCodec.from_metadata(meta)
+    return render_resolution
 
 
 def _load_env_meta_from_cache(
@@ -552,7 +542,7 @@ def build_robomimic_runner_setup(
     if env_name is not None:
         env_meta["env_name"] = env_name
 
-    default_res, rgb_jpeg_quality = _load_cache_rgb_codec(
+    default_res = _load_cache_rgb_resolution(
         dataset_path=dataset_path, cache_dir=cache_dir
     )
     env_meta["env_kwargs"]["camera_heights"] = default_res
@@ -661,7 +651,6 @@ def build_robomimic_runner_setup(
         enable_oracle_video_overlay=enable_oracle_video_overlay,
         oracle_overlay_zoom=oracle_overlay_zoom,
         rgb_load_resolutions=rgb_load_resolutions,
-        rgb_jpeg_quality=rgb_jpeg_quality,
     )
     env_seeds, env_prefixes, env_init_fn_dills, env_video_enabled = (
         _build_rollout_init_specs(

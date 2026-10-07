@@ -13,12 +13,9 @@ from typing import Dict, List, Optional, Union
 import h5py
 import numpy as np
 
-from visuomotor.data.core import images as CoreImages
-
 SPATIAL_OBS_KEYS = frozenset({"voxel", "point_cloud"})
 COMMIT_EVERY_DEFAULT = 5000
 LMDB_MAP_SIZE_GB_DEFAULT = 32
-JPEG_QUALITY_DEFAULT = CoreImages.JPEG_QUALITY_DEFAULT
 PROGRESS_EVENT_DEMO_DONE = "demo_done"
 PROGRESS_POLL_INTERVAL_SEC = 0.2
 
@@ -27,7 +24,7 @@ PROGRESS_POLL_INTERVAL_SEC = 0.2
 class RenderedEpisode:
     absolute_action: np.ndarray
     lowdim: Dict[str, np.ndarray]
-    rgb_jpeg: Dict[str, List[bytes]]
+    rgb_frames: Dict[str, List[bytes]]
     voxel_frames: Dict[str, List[tuple]]
     point_cloud_frames: List[bytes]
     oracle: Dict[str, np.ndarray]

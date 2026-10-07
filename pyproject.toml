@@ -17,6 +17,7 @@ dependencies = [
   "flow_matching==1.0.10",
   "h5py==3.8.*",
   "hydra-core==1.2.*",
+  "imagecodecs==2022.9.26",
   "kornia>=0.7,<1",
   "lmdb>=1.4,<2",
   "numpy==1.23.3",
